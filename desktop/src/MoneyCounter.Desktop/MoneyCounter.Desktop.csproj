@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>MoneyCounter.Desktop</AssemblyName>
+    <RootNamespace>MoneyCounter.Desktop</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+    <ProjectReference Include="..\MoneyCounter.Core\MoneyCounter.Core.csproj" />
+    <ProjectReference Include="..\MoneyCounter.Infrastructure\MoneyCounter.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

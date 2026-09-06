@@ -1,0 +1,22 @@
+<Window x:Class="MoneyCounter.Desktop.RegistryEditor" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="编辑记录" Width="620" Height="650" MinWidth="520" MinHeight="540" WindowStartupLocation="CenterOwner" FontSize="14" AutomationProperties.AutomationId="RegistryEditor">
+ <DockPanel Margin="24">
+  <StackPanel DockPanel.Dock="Bottom"><TextBlock x:Name="ErrorText" TextWrapping="Wrap" Margin="4,12" AutomationProperties.AutomationId="ValidationError"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button x:Name="SaveButton" Content="保存" Click="SaveClick" AutomationProperties.AutomationId="SaveRecord"/><Button Content="取消" Click="CancelClick" AutomationProperties.AutomationId="CancelEdit"/></StackPanel></StackPanel>
+  <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Form">
+   <StackPanel x:Name="ModelFields">
+    <Label Content="制造商 *" Target="{Binding ElementName=Manufacturer}"/><TextBox x:Name="Manufacturer" MaxLength="120" AutomationProperties.AutomationId="Manufacturer"/>
+    <Label Content="型号名称 *" Target="{Binding ElementName=ModelName}"/><TextBox x:Name="ModelName" MaxLength="120" AutomationProperties.AutomationId="ModelName"/>
+    <Label Content="额定点钞寿命（可空，正整数）" Target="{Binding ElementName=RatedLife}"/><TextBox x:Name="RatedLife" AutomationProperties.AutomationId="RatedLife"/>
+   </StackPanel>
+   <StackPanel x:Name="DeviceFields">
+    <Label Content="资产编号 *" Target="{Binding ElementName=AssetCode}"/><TextBox x:Name="AssetCode" MaxLength="64" AutomationProperties.AutomationId="AssetCode"/>
+    <Label Content="设备型号 *" Target="{Binding ElementName=ModelChoice}"/><ComboBox x:Name="ModelChoice" DisplayMemberPath="Label" SelectedValuePath="Id" AutomationProperties.AutomationId="ModelChoice"/>
+    <Label Content="启用日期" Target="{Binding ElementName=CommissionedOn}"/><DatePicker x:Name="CommissionedOn" Margin="4" AutomationProperties.AutomationId="CommissionedOn"/>
+    <Label Content="购置日期" Target="{Binding ElementName=PurchasedOn}"/><DatePicker x:Name="PurchasedOn" Margin="4" AutomationProperties.AutomationId="PurchasedOn"/>
+    <Label Content="位置" Target="{Binding ElementName=Location}"/><TextBox x:Name="Location" MaxLength="200" AutomationProperties.AutomationId="Location"/>
+    <Label Content="负责人" Target="{Binding ElementName=ResponsiblePerson}"/><TextBox x:Name="ResponsiblePerson" MaxLength="100" AutomationProperties.AutomationId="ResponsiblePerson"/>
+   </StackPanel>
+   <Label Content="备注" Target="{Binding ElementName=Notes}"/><TextBox x:Name="Notes" AcceptsReturn="True" Height="90" TextWrapping="Wrap" MaxLength="2000" VerticalScrollBarVisibility="Auto" AutomationProperties.AutomationId="Notes"/>
+  </StackPanel></ScrollViewer>
+ </DockPanel>
+</Window>

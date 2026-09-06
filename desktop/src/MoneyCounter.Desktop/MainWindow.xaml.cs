@@ -1,0 +1,50 @@
+using System.Windows;
+using Microsoft.Extensions.Logging;
+using MoneyCounter.Desktop.Infrastructure;
+using MoneyCounter.Desktop.ViewModels;
+namespace MoneyCounter.Desktop;
+public partial class MainWindow : Window
+{
+    private readonly RegistryViewModel _vm;
+    private readonly ILogger<RegistryEditor> _editorLogger;
+    private readonly WindowPlacement _placement;
+    public MainWindow(RegistryViewModel vm, ILogger<RegistryEditor> editorLogger, string windowPlacementPath)
+    {
+        InitializeComponent(); _vm = vm; _editorLogger = editorLogger; _placement = new WindowPlacement(windowPlacementPath); DataContext = vm;
+        _placement.Restore(this);
+        Loaded += (_, _) => _placement.EnsureVisible(this);
+        Closing += (_, e) => { if (_vm.IsBusy) { e.Cancel = true; _vm.Status = "正在保存或查询，请等待完成后关闭。"; } };
+        Closing += (_, e) => { if (!e.Cancel) _placement.Save(this); };
+    }
+    private async void DevicesClick(object sender, RoutedEventArgs e) => await Navigate(0);
+    private async void ModelsClick(object sender, RoutedEventArgs e) => await Navigate(1);
+    private async Task Navigate(int section)
+    {
+        if (_vm.IsBusy) return;
+        _vm.Section = section; DeviceGrid.Visibility = section == 0 ? Visibility.Visible : Visibility.Collapsed; ModelGrid.Visibility = section == 1 ? Visibility.Visible : Visibility.Collapsed;
+        await _vm.RefreshAsync();
+    }
+    private async void SearchClick(object sender, RoutedEventArgs e) { _vm.ResetPage(); await _vm.RefreshAsync(); }
+    private async void ResetClick(object sender, RoutedEventArgs e) { _vm.Search = ""; _vm.ResetPage(); await _vm.RefreshAsync(); }
+    private async void AddClick(object sender, RoutedEventArgs e) => await Edit(false);
+    private async void EditClick(object sender, RoutedEventArgs e) => await Edit(true);
+    private async Task Edit(bool existing)
+    {
+        if (_vm.IsBusy) return;
+        if (existing && (_vm.Section == 0 ? _vm.SelectedDevice is null : _vm.SelectedModel is null)) { _vm.Status = "请先选择一条记录"; return; }
+        var dialog = new RegistryEditor(_vm.Service, _editorLogger, _vm.Section, existing ? _vm.SelectedModel : null, existing ? _vm.SelectedDevice : null) { Owner = this };
+        var saved = dialog.ShowDialog() == true;
+        await _vm.RefreshAsync();
+        if (saved) _vm.Status = "保存成功";
+    }
+    private async void DeactivateClick(object sender, RoutedEventArgs e)
+    {
+        if (_vm.IsBusy) return;
+        if (MessageBox.Show(this, "停用后不再用于新业务，历史记录仍保留。是否继续？", "停用记录", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes) await _vm.DeactivateAsync();
+    }
+    private void DeviceDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_vm.SelectedDevice is not { } d) return;
+        MessageBox.Show(this, $"资产编号：{d.AssetCode}\n型号：{d.Manufacturer} {d.ModelName}\n位置：{d.Location}\n负责人：{d.ResponsiblePerson}\n备注：{d.Notes}\n\n状态、故障等历史页面尚在实施。", "设备详情");
+    }
+}

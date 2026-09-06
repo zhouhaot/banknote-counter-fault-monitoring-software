@@ -1,0 +1,275 @@
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Threading;
+using System.Windows;
+using System.Windows.Automation;
+
+namespace MoneyCounter.UiTests;
+
+internal static class Program
+{
+    private const int TimeoutMilliseconds = 15_000;
+
+    [STAThread]
+    private static int Main(string[] args)
+    {
+        try
+        {
+            var options = Options.Parse(args);
+            Directory.CreateDirectory(options.EvidenceDirectory);
+            var run = new SmokeRun(options);
+            run.Execute();
+            run.WriteReport(true, null);
+            Console.WriteLine($"PASS: native UI smoke evidence: {options.EvidenceDirectory}");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"FAIL: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private sealed class SmokeRun(Options options)
+    {
+        private readonly List<string> _steps = [];
+        private Process? _process;
+        private readonly string _manufacturer = "UIA 厂商";
+        private readonly string _modelName = "UIA-100";
+        private readonly string _assetCode = "UIA-ASSET-001";
+
+        public void Execute()
+        {
+            try
+            {
+                var main = Start();
+                CreateModel(main);
+                CreateDevice(main);
+                QueryDevice(main);
+                VerifyDuplicateModel(main);
+                CloseApplication(main);
+
+                main = Start();
+                VerifyPersistedModel(main);
+                VerifyPersistedDevice(main);
+                CaptureWindow(main, Path.Combine(options.EvidenceDirectory, "persisted-device.png"));
+                CloseApplication(main);
+            }
+            catch (Exception ex)
+            {
+                if (_process is not null && !_process.HasExited)
+                {
+                    try { _process.Kill(entireProcessTree: true); _process.WaitForExit(5_000); } catch { }
+                }
+                WriteReport(false, ex);
+                throw;
+            }
+        }
+
+        public void WriteReport(bool passed, Exception? error)
+        {
+            var report = new { passed, executable = options.Executable, dataDirectory = options.DataDirectory, steps = _steps, error = error?.ToString() };
+            File.WriteAllText(Path.Combine(options.EvidenceDirectory, "ui-smoke-report.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+        }
+
+        private AutomationElement Start()
+        {
+            var info = new ProcessStartInfo(options.Executable) { UseShellExecute = false };
+            info.ArgumentList.Add("--data-dir");
+            info.ArgumentList.Add(options.DataDirectory);
+            _process = Process.Start(info) ?? throw new InvalidOperationException("Unable to start the desktop executable.");
+            var main = WaitForWindow(_process.Id, "MainWindow");
+            _steps.Add("Started actual desktop application with an isolated absolute data directory.");
+            return main;
+        }
+
+        private void CreateModel(AutomationElement main)
+        {
+            Invoke(Find(main, "NavModels"));
+            WaitForStatus(main, "当前没有符合条件的记录");
+            Invoke(Find(main, "AddRecord"));
+            var editor = WaitForWindow(_process!.Id, "RegistryEditor");
+            SetValue(Find(editor, "Manufacturer"), _manufacturer);
+            SetValue(Find(editor, "ModelName"), _modelName);
+            SetValue(Find(editor, "RatedLife"), "1000000");
+            Invoke(Find(editor, "SaveRecord"));
+            WaitUntil(() => FindWindow(_process!.Id, "RegistryEditor") is null, "model editor to close after save");
+            WaitForName(main, _modelName);
+            _steps.Add("Created a model through the model-management editor.");
+        }
+
+        private void CreateDevice(AutomationElement main)
+        {
+            Invoke(Find(main, "NavDevices"));
+            WaitForStatus(main, "当前没有符合条件的记录");
+            Invoke(Find(main, "AddRecord"));
+            var editor = WaitForWindow(_process!.Id, "RegistryEditor");
+            SetValue(Find(editor, "AssetCode"), _assetCode);
+            var choice = Find(editor, "ModelChoice");
+            WaitUntil(() => choice.TryGetCurrentPattern(SelectionPattern.Pattern, out var pattern) && ((SelectionPattern)pattern).Current.GetSelection().Length == 1, "default model selection");
+            SetValue(Find(editor, "Location"), "UI 自动化实验室");
+            SetValue(Find(editor, "ResponsiblePerson"), "UIA Tester");
+            Invoke(Find(editor, "SaveRecord"));
+            WaitUntil(() => FindWindow(_process!.Id, "RegistryEditor") is null, "device editor to close after save");
+            WaitForName(main, _assetCode);
+            _steps.Add("Created a device through the device-management editor.");
+        }
+
+        private void QueryDevice(AutomationElement main)
+        {
+            SetValue(Find(main, "SearchBox"), "NO-MATCH-" + Guid.NewGuid().ToString("N"));
+            Invoke(Find(main, "SearchButton"));
+            WaitForStatus(main, "当前没有符合条件的记录");
+            if (Find(main, "DevicesGrid").FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, _assetCode)) is not null)
+                throw new InvalidOperationException("Nonmatching query retained the device row.");
+            SetValue(Find(main, "SearchBox"), _assetCode);
+            Invoke(Find(main, "SearchButton"));
+            WaitForStatus(main, "本地数据 · 查询完成");
+            WaitForName(Find(main, "DevicesGrid"), _assetCode);
+            _steps.Add("Queried the newly created device through the main-window search controls.");
+        }
+
+        private void VerifyDuplicateModel(AutomationElement main)
+        {
+            Invoke(Find(main, "NavModels"));
+            WaitForStatus(main, "本地数据 · 查询完成");
+            Invoke(Find(main, "AddRecord"));
+            var editor = WaitForWindow(_process!.Id, "RegistryEditor");
+            SetValue(Find(editor, "Manufacturer"), _manufacturer);
+            SetValue(Find(editor, "ModelName"), _modelName);
+            Invoke(Find(editor, "SaveRecord"));
+            var error = Find(editor, "ValidationError");
+            WaitUntil(() => (error.Current.Name ?? string.Empty).Contains("型号已存在", StringComparison.Ordinal), "duplicate model validation message");
+            CaptureWindow(editor, Path.Combine(options.EvidenceDirectory, "duplicate-validation.png"));
+            Invoke(Find(editor, "CancelEdit"));
+            AutomationElement? discard = null;
+            WaitUntil(() => (discard = main.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, "6"))) is not null, "unsaved-change confirmation");
+            Invoke(discard!);
+            WaitUntil(() => FindWindow(_process!.Id, "RegistryEditor") is null, "duplicate editor to close");
+            _steps.Add("Verified duplicate-model validation in the real editor without accepting a false save.");
+        }
+
+        private void VerifyPersistedModel(AutomationElement main)
+        {
+            Invoke(Find(main, "NavModels"));
+            WaitForStatus(main, "本地数据 · 查询完成");
+            SetValue(Find(main, "SearchBox"), _modelName);
+            Invoke(Find(main, "SearchButton"));
+            WaitForName(main, _modelName);
+            _steps.Add("Reopened the application and verified the model persisted.");
+        }
+
+        private void VerifyPersistedDevice(AutomationElement main)
+        {
+            Invoke(Find(main, "NavDevices"));
+            WaitForStatus(main, "本地数据 · 查询完成");
+            SetValue(Find(main, "SearchBox"), _assetCode);
+            Invoke(Find(main, "SearchButton"));
+            WaitForName(main, _assetCode);
+            _steps.Add("Reopened the application and verified the device persisted.");
+        }
+
+        private void CloseApplication(AutomationElement main)
+        {
+            ((WindowPattern)main.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            _process!.WaitForExit(TimeoutMilliseconds);
+            if (!_process.HasExited) throw new InvalidOperationException("Desktop application did not exit after its window was closed.");
+            _steps.Add("Closed the real application cleanly.");
+        }
+    }
+
+    private static AutomationElement WaitForWindow(int processId, string automationId)
+    {
+        AutomationElement? window = null;
+        var until = Stopwatch.StartNew();
+        while (until.ElapsedMilliseconds < TimeoutMilliseconds)
+        {
+            if ((window = FindWindow(processId, automationId)) is not null) return window;
+            Thread.Sleep(100);
+        }
+        throw new TimeoutException($"Timed out waiting for window '{automationId}'. Top-level windows for process {processId}: {DescribeWindows(processId)}");
+    }
+
+    private static AutomationElement? FindWindow(int processId, string automationId)
+    {
+        var candidates = AutomationElement.RootElement.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.ProcessIdProperty, processId));
+        foreach (AutomationElement candidate in candidates)
+        {
+            if (candidate.Current.AutomationId == automationId) return candidate;
+            var owned = candidate.FindFirst(TreeScope.Descendants, new AndCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window), new PropertyCondition(AutomationElement.AutomationIdProperty, automationId)));
+            if (owned is not null) return owned;
+            if (automationId == "RegistryEditor" && candidate.Current.ControlType == ControlType.Window && candidate.Current.Name.EndsWith("建档", StringComparison.Ordinal)) return candidate;
+        }
+        return null;
+    }
+
+    private static string DescribeWindows(int processId)
+    {
+        var candidates = AutomationElement.RootElement.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.ProcessIdProperty, processId));
+        return string.Join("; ", candidates.Cast<AutomationElement>().Select(x => $"id={x.Current.AutomationId},name={x.Current.Name},type={x.Current.ControlType.ProgrammaticName}"));
+    }
+
+    private static AutomationElement Find(AutomationElement root, string automationId) => root.FindFirst(TreeScope.Descendants,
+        new PropertyCondition(AutomationElement.AutomationIdProperty, automationId)) ?? throw new InvalidOperationException($"Automation element '{automationId}' was not found.");
+
+    private static void Invoke(AutomationElement element)
+    {
+        if (!element.TryGetCurrentPattern(InvokePattern.Pattern, out var pattern)) throw new InvalidOperationException($"'{element.Current.AutomationId}' does not support InvokePattern.");
+        ((InvokePattern)pattern).Invoke();
+    }
+
+    private static void SetValue(AutomationElement element, string value)
+    {
+        if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern)) throw new InvalidOperationException($"'{element.Current.AutomationId}' does not support ValuePattern.");
+        ((ValuePattern)pattern).SetValue(value);
+    }
+
+    private static void WaitForName(AutomationElement root, string expected) => WaitUntil(() => root.FindFirst(TreeScope.Descendants,
+        new PropertyCondition(AutomationElement.NameProperty, expected)) is not null, $"text '{expected}'");
+
+    private static void WaitForStatus(AutomationElement main, string expected) => WaitUntil(() => Find(main, "StatusText").Current.Name == expected, $"status '{expected}'");
+
+    private static void WaitUntil(Func<bool> condition, string description)
+    {
+        var until = Stopwatch.StartNew();
+        while (until.ElapsedMilliseconds < TimeoutMilliseconds)
+        {
+            try { if (condition()) return; } catch (ElementNotAvailableException) { }
+            Thread.Sleep(100);
+        }
+        throw new TimeoutException($"Timed out waiting for {description}.");
+    }
+
+    private static void CaptureWindow(AutomationElement window, string path)
+    {
+        var rect = window.Current.BoundingRectangle;
+        if (rect.Width <= 0 || rect.Height <= 0) throw new InvalidOperationException("Cannot capture a window without a visible bounding rectangle.");
+        using var image = new Bitmap((int)Math.Ceiling(rect.Width), (int)Math.Ceiling(rect.Height));
+        using var graphics = Graphics.FromImage(image);
+        graphics.CopyFromScreen((int)rect.Left, (int)rect.Top, 0, 0, image.Size, CopyPixelOperation.SourceCopy);
+        image.Save(path, ImageFormat.Png);
+    }
+
+    private sealed record Options(string Executable, string DataDirectory, string EvidenceDirectory)
+    {
+        public static Options Parse(string[] args)
+        {
+            string? exe = null, evidence = null;
+            for (var i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--exe" && ++i < args.Length) exe = args[i];
+                else if (args[i] == "--evidence" && ++i < args.Length) evidence = args[i];
+                else throw new ArgumentException("Usage: --exe <absolute executable path> --evidence <absolute evidence directory>");
+            }
+            if (string.IsNullOrWhiteSpace(exe) || string.IsNullOrWhiteSpace(evidence) || !Path.IsPathFullyQualified(exe) || !Path.IsPathFullyQualified(evidence)) throw new ArgumentException("Both --exe and --evidence must be absolute paths.");
+            exe = Path.GetFullPath(exe); evidence = Path.GetFullPath(evidence);
+            if (!File.Exists(exe)) throw new FileNotFoundException("Desktop executable was not found.", exe);
+            var data = Path.Combine(evidence, Guid.NewGuid().ToString("N"), "data");
+            return new(exe, data, evidence);
+        }
+    }
+}

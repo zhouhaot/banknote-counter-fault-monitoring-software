@@ -1,0 +1,30 @@
+<Window x:Class="MoneyCounter.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:infra="clr-namespace:MoneyCounter.Desktop.Infrastructure"
+ Title="点钞机运行状态监测与故障管理系统" Width="1280" Height="800" MinWidth="960" MinHeight="640" FontSize="14" AutomationProperties.AutomationId="MainWindow">
+ <Window.Resources><infra:SourceLabelConverter x:Key="SourceLabel"/></Window.Resources>
+ <DockPanel>
+  <Border DockPanel.Dock="Bottom" Padding="16,10" BorderBrush="Gray" BorderThickness="0,1,0,0"><TextBlock Text="{Binding Status}" AutomationProperties.AutomationId="StatusText"/></Border>
+  <Border DockPanel.Dock="Left" Width="208" Padding="12" BorderBrush="Gray" BorderThickness="0,0,1,0"><StackPanel>
+   <TextBlock Text="设备维护工作台" FontSize="19" Margin="8,12,0,24"/>
+   <Button Content="设备台账" Click="DevicesClick" AutomationProperties.AutomationId="NavDevices"/>
+   <Button Content="型号管理" Click="ModelsClick" AutomationProperties.AutomationId="NavModels"/>
+   <TextBlock Text="后续业务模块实施中" Margin="8,28,0,8"/>
+   <TextBlock Text="状态与异常&#10;故障与维修&#10;耗材库存&#10;统计分析&#10;数据导入&#10;备份与恢复" LineHeight="32" Margin="8"/>
+   <TextBlock Text="开发预览版 0.1.0&#10;状态为人工业务记录" Margin="8,32,0,0"/>
+  </StackPanel></Border>
+  <Grid Margin="24"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+   <DockPanel><TextBlock Text="{Binding Title}" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="新增" Click="AddClick" AutomationProperties.AutomationId="AddRecord"/><Button Content="编辑" Click="EditClick" AutomationProperties.AutomationId="EditRecord"/><Button Content="停用" Click="DeactivateClick" AutomationProperties.AutomationId="DeactivateRecord"/></StackPanel>
+   </DockPanel>
+   <DockPanel LastChildFill="False" Grid.Row="1" Margin="0,20,0,16"><TextBlock Text="查询编号 / 名称" VerticalAlignment="Center" Margin="0,0,12,0"/><TextBox Text="{Binding Search,UpdateSourceTrigger=PropertyChanged}" Width="260" AutomationProperties.AutomationId="SearchBox"/><Button Content="查询" Click="SearchClick" AutomationProperties.AutomationId="SearchButton"/><Button Content="重置" Click="ResetClick" AutomationProperties.AutomationId="ResetButton"/></DockPanel>
+   <Grid Grid.Row="2">
+    <DataGrid x:Name="DeviceGrid" ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}" AutomationProperties.AutomationId="DevicesGrid" MouseDoubleClick="DeviceDoubleClick">
+     <DataGrid.Columns><DataGridTextColumn Header="资产编号" Binding="{Binding AssetCode}" Width="140"/><DataGridTextColumn Header="制造商" Binding="{Binding Manufacturer}" Width="120"/><DataGridTextColumn Header="型号" Binding="{Binding ModelName}" Width="130"/><DataGridTextColumn Header="位置" Binding="{Binding Location}" Width="*"/><DataGridTextColumn Header="负责人" Binding="{Binding ResponsiblePerson}" Width="110"/><DataGridTextColumn Header="来源" Binding="{Binding Source,Converter={StaticResource SourceLabel}}" Width="100"/><DataGridCheckBoxColumn Header="启用" Binding="{Binding IsActive}" Width="70"/></DataGrid.Columns>
+    </DataGrid>
+    <DataGrid x:Name="ModelGrid" Visibility="Collapsed" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}" AutomationProperties.AutomationId="ModelsGrid">
+     <DataGrid.Columns><DataGridTextColumn Header="制造商" Binding="{Binding Manufacturer}" Width="180"/><DataGridTextColumn Header="型号" Binding="{Binding ModelName}" Width="180"/><DataGridTextColumn Header="额定点钞寿命" Binding="{Binding RatedCountLife}" Width="150"/><DataGridTextColumn Header="备注" Binding="{Binding Notes}" Width="*"/><DataGridTextColumn Header="来源" Binding="{Binding Source,Converter={StaticResource SourceLabel}}" Width="100"/><DataGridCheckBoxColumn Header="启用" Binding="{Binding IsActive}" Width="70"/></DataGrid.Columns>
+    </DataGrid>
+   </Grid>
+   <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0"><Button Content="上一页" Command="{Binding PreviousCommand}" AutomationProperties.AutomationId="PreviousPage"/><TextBlock Text="{Binding PageInfo}" VerticalAlignment="Center" Margin="12,0"/><Button Content="下一页" Command="{Binding NextCommand}" AutomationProperties.AutomationId="NextPage"/></StackPanel>
+  </Grid>
+ </DockPanel>
+</Window>

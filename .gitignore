@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+artifacts/
+**/TestResults/
+.superpowers/
+.tools/
+*.sqlite3*
+*.db*
+*.log
+.env
+*.pfx
+*.key
+软件著作权申请资料/
