@@ -8,15 +8,22 @@ public partial class MainWindow : Window
     private readonly RegistryViewModel _vm;
     private readonly ILogger<RegistryEditor> _editorLogger;
     private readonly WindowPlacement _placement;
-    public MainWindow(RegistryViewModel vm, ILogger<RegistryEditor> editorLogger, string windowPlacementPath)
+    private readonly Func<MoneyCounter.Core.Registry.DeviceDetail, OperationsViewModel> _operations;
+    public MainWindow(RegistryViewModel vm, ILogger<RegistryEditor> editorLogger, string windowPlacementPath, Func<MoneyCounter.Core.Registry.DeviceDetail, OperationsViewModel> operations)
     {
-        InitializeComponent(); _vm = vm; _editorLogger = editorLogger; _placement = new WindowPlacement(windowPlacementPath); DataContext = vm;
+        InitializeComponent(); _vm = vm; _editorLogger = editorLogger; _operations = operations; _placement = new WindowPlacement(windowPlacementPath); DataContext = vm;
         _placement.Restore(this);
         Loaded += (_, _) => _placement.EnsureVisible(this);
         Closing += (_, e) => { if (_vm.IsBusy) { e.Cancel = true; _vm.Status = "正在保存或查询，请等待完成后关闭。"; } };
         Closing += (_, e) => { if (!e.Cancel) _placement.Save(this); };
     }
     private async void DevicesClick(object sender, RoutedEventArgs e) => await Navigate(0);
+    private void OperationsClick(object sender, RoutedEventArgs e)
+    {
+        if (_vm.IsBusy) return;
+        if (_vm.Section != 0 || _vm.SelectedDevice is not { } device) { _vm.Status = "请在设备台账中选择一台设备，再打开状态与异常。"; return; }
+        new OperationsWindow(_operations(device)) { Owner = this }.ShowDialog();
+    }
     private async void ModelsClick(object sender, RoutedEventArgs e) => await Navigate(1);
     private async Task Navigate(int section)
     {

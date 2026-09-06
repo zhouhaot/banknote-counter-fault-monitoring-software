@@ -51,11 +51,15 @@ internal static class Program
                 CreateDevice(main);
                 QueryDevice(main);
                 VerifyDuplicateModel(main);
+                Invoke(Find(main, "NavDevices"));
+                WaitForStatus(main, "本地数据 · 查询完成");
+                ExerciseOperations(main);
                 CloseApplication(main);
 
                 main = Start();
                 VerifyPersistedModel(main);
                 VerifyPersistedDevice(main);
+                VerifyPersistedOperations(main);
                 CaptureWindow(main, Path.Combine(options.EvidenceDirectory, "persisted-device.png"));
                 CloseApplication(main);
             }
@@ -63,6 +67,16 @@ internal static class Program
             {
                 if (_process is not null && !_process.HasExited)
                 {
+                    try
+                    {
+                        var failedWindow = FindWindow(_process.Id, "MainWindow");
+                        if (failedWindow is not null)
+                        {
+                            CaptureWindow(failedWindow, Path.Combine(options.EvidenceDirectory, "failure.png"));
+                            File.WriteAllText(Path.Combine(options.EvidenceDirectory, "failure-ui.txt"), string.Join("\n", failedWindow.FindAll(TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition).Cast<AutomationElement>().Select(x => $"{x.Current.ControlType.ProgrammaticName} {x.Current.AutomationId}: {x.Current.Name}")));
+                        }
+                    }
+                    catch (Exception diagnostic) { Console.Error.WriteLine("Failure capture unavailable: " + diagnostic.Message); }
                     try { _process.Kill(entireProcessTree: true); _process.WaitForExit(5_000); } catch { }
                 }
                 WriteReport(false, ex);
@@ -83,6 +97,7 @@ internal static class Program
             info.ArgumentList.Add(options.DataDirectory);
             _process = Process.Start(info) ?? throw new InvalidOperationException("Unable to start the desktop executable.");
             var main = WaitForWindow(_process.Id, "MainWindow");
+            WaitUntil(() => Find(main, "StatusText").Current.Name is "当前没有符合条件的记录" or "本地数据 · 查询完成", "initial registry query");
             _steps.Add("Started actual desktop application with an isolated absolute data directory.");
             return main;
         }
@@ -157,9 +172,14 @@ internal static class Program
         {
             Invoke(Find(main, "NavModels"));
             WaitForStatus(main, "本地数据 · 查询完成");
+            WaitForName(Find(main, "ModelsGrid"), _modelName);
+            SetValue(Find(main, "SearchBox"), "NO-MATCH-" + Guid.NewGuid().ToString("N"));
+            Invoke(Find(main, "SearchButton"));
+            WaitForStatus(main, "当前没有符合条件的记录");
             SetValue(Find(main, "SearchBox"), _modelName);
             Invoke(Find(main, "SearchButton"));
-            WaitForName(main, _modelName);
+            WaitForStatus(main, "本地数据 · 查询完成");
+            WaitForName(Find(main, "ModelsGrid"), _modelName);
             _steps.Add("Reopened the application and verified the model persisted.");
         }
 
@@ -167,9 +187,8 @@ internal static class Program
         {
             Invoke(Find(main, "NavDevices"));
             WaitForStatus(main, "本地数据 · 查询完成");
-            SetValue(Find(main, "SearchBox"), _assetCode);
-            Invoke(Find(main, "SearchButton"));
-            WaitForName(main, _assetCode);
+            WaitForName(Find(main, "DevicesGrid"), _assetCode);
+            QueryDevice(main);
             _steps.Add("Reopened the application and verified the device persisted.");
         }
 
@@ -179,6 +198,72 @@ internal static class Program
             _process!.WaitForExit(TimeoutMilliseconds);
             if (!_process.HasExited) throw new InvalidOperationException("Desktop application did not exit after its window was closed.");
             _steps.Add("Closed the real application cleanly.");
+        }
+
+        private AutomationElement OpenOperations(AutomationElement main)
+        {
+            var row = Find(main, "DevicesGrid").FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)) ?? throw new InvalidOperationException("Device row missing.");
+            ((SelectionItemPattern)row.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            Invoke(Find(main, "NavOperations"));
+            var window = WaitForWindow(_process!.Id, "OperationsWindow");
+            WaitUntil(() => Find(window, "OperationsFeedback").Current.Name == "历史记录已刷新", "operations history loaded");
+            return window;
+        }
+
+        private void ExerciseOperations(AutomationElement main)
+        {
+            var window = OpenOperations(main);
+            void Save(string time, string count, string feedback)
+            {
+                SetValue(Find(window, "RecordedAt"), time);
+                SetValue(Find(window, "CumulativeCount"), count);
+                Invoke(Find(window, "SaveStatus"));
+                WaitUntil(() => Find(window, "OperationsFeedback").Current.Name.Contains(feedback, StringComparison.Ordinal), feedback);
+                if (feedback == "状态记录已保存") WaitForName(Find(window, "StatusHistory"), count);
+            }
+            Save("2026-01-01 08:00:00", "100", "状态记录已保存");
+            Save("2026-01-01 10:00:00", "300", "状态记录已保存");
+            Save("2026-01-01 09:00:00", "301", "累计读数大于后一条记录");
+            if (((ValuePattern)Find(window, "CumulativeCount").GetCurrentPattern(ValuePattern.Pattern)).Current.Value != "301") throw new InvalidOperationException("Failed save lost input.");
+            Save("2026-01-01 09:00:00", "200", "状态记录已保存");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "status-history.png"));
+            ((SelectionItemPattern)Find(window, "AnomalyTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            SetValue(Find(window, "DiscoveredAt"), "2026-01-01 08:00:00");
+            SetValue(Find(window, "AnomalyDescription"), "UIA 卡钞异常");
+            Invoke(Find(window, "SaveAnomaly"));
+            WaitUntil(() => Find(window, "OperationsFeedback").Current.Name == "异常已登记", "anomaly created");
+            var row = Find(window, "AnomalyHistory").FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem))!;
+            ((SelectionItemPattern)row.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            SetValue(Find(window, "ClosedAt"), "2026-01-01 09:00:00");
+            SetValue(Find(window, "HandlingNotes"), "UIA 清理并确认恢复");
+            Invoke(Find(window, "CloseAnomaly"));
+            WaitUntil(() => Find(window, "OperationsFeedback").Current.Name == "异常已关闭，历史记录已保留", "anomaly closed");
+            WaitForName(Find(window, "AnomalyHistory"), "已关闭");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "anomaly-closed.png"));
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            _steps.Add("Recorded status chronology, rejected backward historical reading with input preserved, and created/closed an anomaly in native UI.");
+        }
+
+        private void VerifyPersistedOperations(AutomationElement main)
+        {
+            var window = OpenOperations(main);
+            WaitForName(Find(window, "StatusHistory"), "300");
+            ((SelectionItemPattern)Find(window, "AnomalyTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            WaitForName(Find(window, "AnomalyHistory"), "已关闭");
+            WaitForName(Find(window, "AnomalyHistory"), "UIA 清理并确认恢复");
+            ((SelectionItemPattern)Find(window, "StatusTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            SetValue(Find(window, "StatusNotes"), "UIA 未保存内容");
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            AutomationElement? no = null;
+            WaitUntil(() => (no = main.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, "7"))) is not null, "unsaved operations confirmation");
+            Invoke(no!);
+            if (((ValuePattern)Find(window, "StatusNotes").GetCurrentPattern(ValuePattern.Pattern)).Current.Value != "UIA 未保存内容") throw new InvalidOperationException("Cancel close lost status input.");
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            AutomationElement? yes = null;
+            WaitUntil(() => (yes = main.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, "6"))) is not null, "discard operations confirmation");
+            Invoke(yes!);
+            _steps.Add("Reopened and verified persisted status history and closed anomaly handling notes.");
+            _steps.Add("Verified unsaved status input survives cancelling window closure, then explicitly discarded it.");
         }
     }
 
@@ -218,6 +303,7 @@ internal static class Program
 
     private static void Invoke(AutomationElement element)
     {
+        WaitUntil(() => element.Current.IsEnabled, "enabled control " + element.Current.AutomationId);
         if (!element.TryGetCurrentPattern(InvokePattern.Pattern, out var pattern)) throw new InvalidOperationException($"'{element.Current.AutomationId}' does not support InvokePattern.");
         ((InvokePattern)pattern).Invoke();
     }

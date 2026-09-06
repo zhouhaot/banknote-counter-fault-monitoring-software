@@ -3,6 +3,8 @@ using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MoneyCounter.Core.Registry;
+using MoneyCounter.Core.Operations;
+using MoneyCounter.Infrastructure.Operations;
 using MoneyCounter.Infrastructure.Storage;
 using MoneyCounter.Desktop.Infrastructure;
 using MoneyCounter.Desktop.ViewModels;
@@ -33,13 +35,15 @@ public partial class App : Application
             services.AddLogging(b => b.AddProvider(new FileLoggerProvider(Path.Combine(logDir, "app.log"))));
             services.AddSingleton(new DbStore(Path.Combine(dataDir, "app.sqlite3")));
             services.AddSingleton<IRegistryService, SqliteRegistryService>();
+            services.AddSingleton<IOperationsService, SqliteOperationsService>();
             services.AddSingleton<RegistryViewModel>();
             _services = services.BuildServiceProvider();
             await _services.GetRequiredService<DbStore>().InitializeAsync();
             var vm = _services.GetRequiredService<RegistryViewModel>();
             var configDir = Path.Combine(dataDir, "..", "config");
             Directory.CreateDirectory(configDir);
-            var window = new MainWindow(vm, _services.GetRequiredService<ILogger<RegistryEditor>>(), Path.Combine(configDir, "window-placement.json")); MainWindow = window;
+            var window = new MainWindow(vm, _services.GetRequiredService<ILogger<RegistryEditor>>(), Path.Combine(configDir, "window-placement.json"),
+                d => new OperationsViewModel(d, _services.GetRequiredService<IOperationsService>(), _services.GetRequiredService<ILogger<OperationsViewModel>>())); MainWindow = window;
             _instance.StartActivationListener(window); window.Show();
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             await vm.RefreshAsync();

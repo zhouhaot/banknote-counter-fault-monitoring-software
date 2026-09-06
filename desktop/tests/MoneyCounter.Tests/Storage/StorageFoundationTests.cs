@@ -6,6 +6,37 @@ namespace MoneyCounter.Tests.Storage;
 public sealed class StorageFoundationTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VersionOneUpgradePreservesRegistryAndRollsBackFailedMigration(bool conflict)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var path = TempPath();
+        try
+        {
+            await using (var setup = new DbStore(path))
+            {
+                await setup.InitializeAsync(ct);
+                var registry = new SqliteRegistryService(setup);
+                Assert.True((await registry.CreateModelAsync(new(Guid.NewGuid(), "迁移厂商", "保留型号", null, "原始备注"), ct)).IsSuccess);
+                await setup.WriteAsync(async (db, tx, token) =>
+                {
+                    using var command = db.CreateCommand(); command.Transaction = tx;
+                    command.CommandText = "DROP TABLE StatusRecord; DROP TABLE Anomaly; DELETE FROM SchemaMigration WHERE Version=2;" + (conflict ? "CREATE VIEW Anomaly AS SELECT 1 AS Id;" : "");
+                    return await command.ExecuteNonQueryAsync(token);
+                }, ct);
+            }
+            await using var upgraded = new DbStore(path);
+            if (conflict) await Assert.ThrowsAsync<SqliteException>(() => upgraded.InitializeAsync(ct));
+            else await upgraded.InitializeAsync(ct);
+            Assert.Equal(1L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM Model WHERE Notes='原始备注'", token), ct));
+            Assert.Equal(conflict ? 1L : 2L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration", token), ct));
+            Assert.Equal(conflict ? 0L : 1L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM sqlite_master WHERE name='StatusRecord'", token), ct));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
     [InlineData("INSERT INTO SchemaMigration VALUES(2,'future','now');")]
     [InlineData("")]
     [InlineData("INSERT INTO SchemaMigration VALUES(1,'registry-v1','now');")]
@@ -114,7 +145,7 @@ public sealed class StorageFoundationTests
             await connection.OpenAsync(TestContext.Current.CancellationToken);
             Assert.Equal(1L, await ScalarAsync(connection, "PRAGMA foreign_keys", TestContext.Current.CancellationToken));
             Assert.Equal("wal", ((string)(await ScalarObjectAsync(connection, "PRAGMA journal_mode", TestContext.Current.CancellationToken))!).ToLowerInvariant());
-            Assert.Equal(1L, await ScalarAsync(connection, "SELECT COUNT(*) FROM SchemaMigration", TestContext.Current.CancellationToken));
+            Assert.Equal(2L, await ScalarAsync(connection, "SELECT COUNT(*) FROM SchemaMigration", TestContext.Current.CancellationToken));
         }
         File.Delete(path);
     }

@@ -19,6 +19,9 @@ public static class ErrorCodes
     public const string RecordNotFound = nameof(RecordNotFound);
     public const string ConcurrentChange = nameof(ConcurrentChange);
     public const string StorageUnavailable = nameof(StorageUnavailable);
+    public const string MonotonicityViolation = nameof(MonotonicityViolation);
+    public const string SourceMismatch = nameof(SourceMismatch);
+    public const string InvalidTransition = nameof(InvalidTransition);
 }
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, long TotalCount);

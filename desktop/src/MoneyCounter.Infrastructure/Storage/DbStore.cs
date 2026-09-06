@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using MoneyCounter.Infrastructure.Operations;
 
 namespace MoneyCounter.Infrastructure.Storage;
 
@@ -39,6 +40,16 @@ public sealed class DbStore : IAsyncDisposable
                 command.CommandText = Schema + "\nINSERT INTO SchemaMigration(Version, Checksum, AppliedAtUtc) VALUES(1, 'registry-v1', $now);";
                 command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            if (await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", cancellationToken).ConfigureAwait(false) == 1)
+            {
+                await using var transaction = db.BeginTransaction();
+                await using var migration = db.CreateCommand();
+                migration.Transaction = transaction;
+                migration.CommandText = OperationsMigration.Sql + "\nINSERT INTO SchemaMigration VALUES(2,'operations-v2',$now);";
+                migration.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+                await migration.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
             await ExecuteAsync(db, "PRAGMA journal_mode=WAL;", cancellationToken).ConfigureAwait(false);
@@ -158,8 +169,8 @@ public sealed class DbStore : IAsyncDisposable
             throw new InvalidOperationException("Database is not a MoneyCounter database.");
         try
         {
-            if (await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration", ct).ConfigureAwait(false) != 1 ||
-                await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration WHERE Version=1 AND Checksum='registry-v1'", ct).ConfigureAwait(false) != 1)
+            if (await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration WHERE Version=1 AND Checksum='registry-v1'", ct).ConfigureAwait(false) != 1 ||
+                await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration WHERE NOT ((Version=1 AND Checksum='registry-v1') OR (Version=2 AND Checksum='operations-v2'))", ct).ConfigureAwait(false) != 0)
                 throw new InvalidOperationException("Database schema is unsupported.");
             // Preparing explicit projections rejects missing tables/columns without repairing user data.
             const string projections = """
@@ -175,6 +186,17 @@ public sealed class DbStore : IAsyncDisposable
                 await using var command = db.CreateCommand();
                 command.CommandText = projection;
                 await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            }
+            if (await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", ct).ConfigureAwait(false) == 2)
+            {
+                foreach (var projection in new[] {
+                    "SELECT Id,DeviceId,RecordedAt,Status,CumulativeCount,Notes,Source,ImportBatchId,SimulationDatasetId,CreatedAtUtc FROM StatusRecord LIMIT 0",
+                    "SELECT Id,DeviceId,DiscoveredAt,Description,Status,HandlingNotes,ClosedAt,Revision,Source,ImportBatchId,SimulationDatasetId,CreatedAtUtc FROM Anomaly LIMIT 0" })
+                {
+                    await using var command = db.CreateCommand();
+                    command.CommandText = projection;
+                    await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                }
             }
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 1)
