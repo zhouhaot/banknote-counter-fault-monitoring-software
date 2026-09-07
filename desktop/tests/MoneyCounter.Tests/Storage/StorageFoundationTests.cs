@@ -22,7 +22,7 @@ public sealed class StorageFoundationTests
                 await setup.WriteAsync(async (db, tx, token) =>
                 {
                     using var command = db.CreateCommand(); command.Transaction = tx;
-                    command.CommandText = "DROP TABLE Repair; DROP TABLE Fault; DROP TABLE StatusRecord; DROP TABLE Anomaly; DELETE FROM SchemaMigration WHERE Version>=2;" + (conflict ? "CREATE VIEW Anomaly AS SELECT 1 AS Id;" : "");
+                    command.CommandText = "DROP TABLE InventoryMovement; DROP TABLE Consumable; DROP TABLE Repair; DROP TABLE Fault; DROP TABLE StatusRecord; DROP TABLE Anomaly; DELETE FROM SchemaMigration WHERE Version>=2;" + (conflict ? "CREATE VIEW Anomaly AS SELECT 1 AS Id;" : "");
                     return await command.ExecuteNonQueryAsync(token);
                 }, ct);
             }
@@ -30,7 +30,7 @@ public sealed class StorageFoundationTests
             if (conflict) await Assert.ThrowsAsync<SqliteException>(() => upgraded.InitializeAsync(ct));
             else await upgraded.InitializeAsync(ct);
             Assert.Equal(1L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM Model WHERE Notes='原始备注'", token), ct));
-            Assert.Equal(conflict ? 1L : 3L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration", token), ct));
+            Assert.Equal(conflict ? 1L : 4L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration", token), ct));
             Assert.Equal(conflict ? 0L : 1L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM sqlite_master WHERE name='StatusRecord'", token), ct));
         }
         finally { File.Delete(path); }
@@ -145,7 +145,7 @@ public sealed class StorageFoundationTests
             await connection.OpenAsync(TestContext.Current.CancellationToken);
             Assert.Equal(1L, await ScalarAsync(connection, "PRAGMA foreign_keys", TestContext.Current.CancellationToken));
             Assert.Equal("wal", ((string)(await ScalarObjectAsync(connection, "PRAGMA journal_mode", TestContext.Current.CancellationToken))!).ToLowerInvariant());
-            Assert.Equal(3L, await ScalarAsync(connection, "SELECT COUNT(*) FROM SchemaMigration", TestContext.Current.CancellationToken));
+            Assert.Equal(4L, await ScalarAsync(connection, "SELECT COUNT(*) FROM SchemaMigration", TestContext.Current.CancellationToken));
         }
         File.Delete(path);
     }

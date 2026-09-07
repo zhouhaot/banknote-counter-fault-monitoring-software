@@ -7,6 +7,8 @@ using MoneyCounter.Core.Operations;
 using MoneyCounter.Infrastructure.Operations;
 using MoneyCounter.Core.Maintenance;
 using MoneyCounter.Infrastructure.Maintenance;
+using MoneyCounter.Core.Inventory;
+using MoneyCounter.Infrastructure.Inventory;
 using MoneyCounter.Infrastructure.Storage;
 using MoneyCounter.Desktop.Infrastructure;
 using MoneyCounter.Desktop.ViewModels;
@@ -39,15 +41,23 @@ public partial class App : Application
             services.AddSingleton<IRegistryService, SqliteRegistryService>();
             services.AddSingleton<IOperationsService, SqliteOperationsService>();
             services.AddSingleton<IMaintenanceService, SqliteMaintenanceService>();
+            services.AddSingleton<IInventoryService, SqliteInventoryService>();
             services.AddSingleton<RegistryViewModel>();
             _services = services.BuildServiceProvider();
             await _services.GetRequiredService<DbStore>().InitializeAsync();
             var vm = _services.GetRequiredService<RegistryViewModel>();
             var configDir = Path.Combine(dataDir, "..", "config");
             Directory.CreateDirectory(configDir);
+            Window Inventory(DeviceDetail? d, FaultDetail? f) => new InventoryWindow(_services.GetRequiredService<IInventoryService>(), _services.GetRequiredService<IRegistryService>(), _services.GetRequiredService<IMaintenanceService>(), _services.GetRequiredService<ILogger<InventoryViewModel>>(), d, f);
+            MaintenanceWindow Maintenance(DeviceDetail d, MoneyCounter.Core.Operations.AnomalyDetail? a)
+            {
+                var result = new MaintenanceWindow(d, _services.GetRequiredService<IMaintenanceService>(), _services.GetRequiredService<ILogger<MaintenanceViewModel>>(), a);
+                result.InventoryFactory = f => Inventory(d, f);
+                return result;
+            }
             var window = new MainWindow(vm, _services.GetRequiredService<ILogger<RegistryEditor>>(), Path.Combine(configDir, "window-placement.json"),
                 d => new OperationsViewModel(d, _services.GetRequiredService<IOperationsService>(), _services.GetRequiredService<ILogger<OperationsViewModel>>()),
-                (d, a) => new MaintenanceWindow(d, _services.GetRequiredService<IMaintenanceService>(), _services.GetRequiredService<ILogger<MaintenanceViewModel>>(), a)); MainWindow = window;
+                Maintenance, Inventory); MainWindow = window;
             _instance.StartActivationListener(window); window.Show();
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             await vm.RefreshAsync();

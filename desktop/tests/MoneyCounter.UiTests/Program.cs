@@ -61,6 +61,7 @@ internal static class Program
                 VerifyPersistedDevice(main);
                 VerifyPersistedOperations(main);
                 VerifyPersistedMaintenance(main);
+                VerifyPersistedInventory(main);
                 CaptureWindow(main, Path.Combine(options.EvidenceDirectory, "persisted-device.png"));
                 CloseApplication(main);
             }
@@ -296,6 +297,8 @@ internal static class Program
             SetValue(Find(window, "RepairTechnician"), "UIA 维修员");
             Invoke(Find(window, "SaveRepair"));
             WaitUntil(() => Find(window, "MaintenanceFeedback").Current.Name == "维修记录已保存", "repair saved");
+            ExerciseInventory(main, window);
+            WaitForName(Find(window, "RepairGrid"), "UIA 清理传感器");
             Invoke(Find(window, "CloseFault"));
             ConfirmYes(main);
             WaitUntil(() => Find(window, "MaintenanceFeedback").Current.Name == "故障已关闭", "fault closed");
@@ -305,6 +308,99 @@ internal static class Program
             WaitUntil(() => Find(operations, "OperationsFeedback").Current.Name == "历史记录已刷新", "conversion history refreshed");
             WaitForName(Find(operations, "AnomalyHistory"), "已转故障");
             _steps.Add("Converted anomaly to fault, started handling, rejected closure without repair, saved repair and closed with immutable history.");
+        }
+
+        private void ExerciseInventory(AutomationElement main, AutomationElement maintenance)
+        {
+            Invoke(Find(maintenance, "FaultInventory"));
+            var window = WaitForWindow(_process!.Id, "InventoryWindow");
+            WaitUntil(() => Find(window, "InventoryFeedback").Current.Name == "已刷新库存与流水", "inventory loaded");
+            SetValue(Find(window, "ConsumableName"), "UIA 清洁布");
+            SetValue(Find(window, "ConsumableUnit"), "包");
+            Invoke(Find(window, "SaveConsumable"));
+            WaitForName(Find(window, "ConsumableGrid"), "UIA 清洁布");
+            SelectFirstRow(Find(window, "ConsumableGrid"));
+            SetValue(Find(window, "MovementQuantity"), "1.25");
+            SetValue(Find(window, "MovementTime"), "2026-01-01 11:21:00");
+            SetValue(Find(window, "MovementReason"), "UIA 领用");
+            Invoke(Find(window, "PostMovement"));
+            WaitUntil(() => Find(window, "InventoryFeedback").Current.Name.Contains("库存不足", StringComparison.Ordinal), "insufficient stock rejected");
+            if (((ValuePattern)Find(window, "MovementQuantity").GetCurrentPattern(ValuePattern.Pattern)).Current.Value != "1.25") throw new InvalidOperationException("Inventory rejection lost input.");
+            SetValue(Find(window, "ConsumableName"), "UIA 备用耗材");
+            SetValue(Find(window, "ConsumableUnit"), "包");
+            Invoke(Find(window, "SaveConsumable"));
+            WaitForName(Find(window, "ConsumableGrid"), "UIA 备用耗材");
+            SetValue(Find(window, "ConsumableSearch"), "UIA 备用耗材");
+            Invoke(Find(window, "SearchConsumables"));
+            WaitUntil(() => Find(window, "ConsumableGrid").FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)).Count == 1, "filtered inventory catalog");
+            var switchTarget = System.Threading.Tasks.Task.Run(() => SelectFirstRow(Find(window, "ConsumableGrid")));
+            nint noButton = 0;
+            WaitUntil(() =>
+            {
+                EnumWindows((handle, _) =>
+                {
+                    GetWindowThreadProcessId(handle, out var pid);
+                    if (pid == _process!.Id) noButton = GetDlgItem(handle, 7);
+                    return noButton == 0;
+                }, 0);
+                return noButton != 0;
+            }, "draft target change confirmation");
+            PostMessage(noButton, 0x00F5, 0, 0);
+            if (!switchTarget.Wait(TimeoutMilliseconds)) throw new TimeoutException("Inventory selection did not finish after confirmation.");
+            if (((SelectionPattern)Find(window, "ConsumableGrid").GetCurrentPattern(SelectionPattern.Pattern)).Current.GetSelection().Length != 0) throw new InvalidOperationException("Declined transfer retained the other consumable selection.");
+            if (((ValuePattern)Find(window, "MovementQuantity").GetCurrentPattern(ValuePattern.Pattern)).Current.Value != "1.25") throw new InvalidOperationException("Cancelled target switch lost quantity.");
+            SetValue(Find(window, "ConsumableSearch"), "UIA 清洁布");
+            Invoke(Find(window, "SearchConsumables"));
+            WaitForName(Find(window, "ConsumableGrid"), "UIA 清洁布");
+            SelectFirstRow(Find(window, "ConsumableGrid"));
+            SelectChoice(Find(window, "MovementType"), "入库");
+            SetValue(Find(window, "MovementQuantity"), "10");
+            SetValue(Find(window, "MovementReason"), "UIA 入库");
+            Invoke(Find(window, "PostMovement"));
+            WaitForName(Find(window, "ConsumableGrid"), "10.00");
+            SelectChoice(Find(window, "MovementType"), "领用（扣减）");
+            SetValue(Find(window, "MovementQuantity"), "1.25");
+            SetValue(Find(window, "MovementTime"), "2026-01-01 11:22:00");
+            SetValue(Find(window, "MovementReason"), "UIA 领用");
+            Invoke(Find(window, "PostMovement"));
+            WaitForName(Find(window, "ConsumableGrid"), "8.75");
+            ((SelectionItemPattern)Find(window, "InventoryLedgerTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            SelectFirstRow(Find(window, "InventoryLedger"));
+            SetValue(Find(window, "MovementTime"), "2026-01-01 11:23:00");
+            SetValue(Find(window, "MovementReason"), "UIA 冲正领用");
+            Invoke(Find(window, "ReverseMovement"));
+            ConfirmYes(main);
+            WaitForName(Find(window, "InventoryLedger"), "UIA 冲正领用");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "inventory-reversal.png"));
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            _steps.Add("Verified insufficient-stock rejection preserves input and repair; received 10, issued 1.25 and reversed issue while retaining ledger history.");
+        }
+
+        private void VerifyPersistedInventory(AutomationElement main)
+        {
+            Invoke(Find(main, "NavInventory"));
+            var window = WaitForWindow(_process!.Id, "InventoryWindow");
+            WaitUntil(() => Find(window, "InventoryFeedback").Current.Name == "已刷新库存与流水", "persisted inventory loaded");
+            WaitForName(Find(window, "ConsumableGrid"), "10.00");
+            ((SelectionItemPattern)Find(window, "InventoryLedgerTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            foreach (var reason in new[] { "UIA 入库", "UIA 领用", "UIA 冲正领用" }) WaitForName(Find(window, "InventoryLedger"), reason);
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            _steps.Add("Reopened inventory and verified balance 10.00 with all three immutable ledger entries.");
+        }
+
+        private static void SelectFirstRow(AutomationElement grid)
+        {
+            var row = grid.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)) ?? throw new InvalidOperationException("Grid row missing.");
+            ((SelectionItemPattern)row.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+        }
+
+        private static void SelectChoice(AutomationElement combo, string name)
+        {
+            var expand = (ExpandCollapsePattern)combo.GetCurrentPattern(ExpandCollapsePattern.Pattern);
+            expand.Expand();
+            var item = combo.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)).Cast<AutomationElement>().FirstOrDefault(x => x.Current.Name == name || x.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, name)) is not null) ?? throw new InvalidOperationException("Choice missing: " + name);
+            ((SelectionItemPattern)item.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            expand.Collapse();
         }
 
         private static void ConfirmYes(AutomationElement main)
@@ -343,6 +439,12 @@ internal static class Program
         }
         throw new TimeoutException($"Timed out waiting for window '{automationId}'. Top-level windows for process {processId}: {DescribeWindows(processId)}");
     }
+
+    private delegate bool EnumWindowCallback(nint handle, nint parameter);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowCallback callback, nint parameter);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint handle, out int processId);
+    [DllImport("user32.dll")] private static extern nint GetDlgItem(nint dialog, int controlId);
+    [DllImport("user32.dll")] private static extern bool PostMessage(nint handle, uint message, nint wParam, nint lParam);
 
     private static AutomationElement? FindWindow(int processId, string automationId)
     {

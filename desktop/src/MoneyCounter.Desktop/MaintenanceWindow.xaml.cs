@@ -10,6 +10,7 @@ namespace MoneyCounter.Desktop;
 public partial class MaintenanceWindow : Window
 {
     private readonly MaintenanceViewModel _viewModel;
+    public Func<FaultDetail, Window>? InventoryFactory { get; set; }
     public MaintenanceWindow(DeviceDetail device, IMaintenanceService service, ILogger<MaintenanceViewModel> logger, AnomalyDetail? sourceAnomaly = null)
     {
         InitializeComponent();
@@ -25,6 +26,12 @@ public partial class MaintenanceWindow : Window
         PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { e.Handled = true; Close(); } };
     }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await _viewModel.RefreshAsync();
+    private void Inventory_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.IsBusy) return;
+        if (_viewModel.CurrentFault is not { } fault || InventoryFactory is null) { _viewModel.Feedback = "请先打开故障详情。"; return; }
+        var window = InventoryFactory(fault); window.Owner = this; window.ShowDialog();
+    }
     private async void OpenFault_Click(object sender, RoutedEventArgs e)
     {
         await _viewModel.OpenFaultCommand.ExecuteAsync(null);
