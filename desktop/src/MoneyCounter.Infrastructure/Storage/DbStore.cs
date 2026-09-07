@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using MoneyCounter.Infrastructure.Operations;
+using MoneyCounter.Infrastructure.Maintenance;
 
 namespace MoneyCounter.Infrastructure.Storage;
 
@@ -48,6 +49,15 @@ public sealed class DbStore : IAsyncDisposable
                 await using var migration = db.CreateCommand();
                 migration.Transaction = transaction;
                 migration.CommandText = OperationsMigration.Sql + "\nINSERT INTO SchemaMigration VALUES(2,'operations-v2',$now);";
+                migration.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+                await migration.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            if (await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", cancellationToken).ConfigureAwait(false) == 2)
+            {
+                await using var transaction = db.BeginTransaction();
+                await using var migration = db.CreateCommand(); migration.Transaction = transaction;
+                migration.CommandText = MaintenanceMigration.Sql + "\nINSERT INTO SchemaMigration VALUES(3,'maintenance-v3',$now);";
                 migration.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
                 await migration.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -170,7 +180,8 @@ public sealed class DbStore : IAsyncDisposable
         try
         {
             if (await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration WHERE Version=1 AND Checksum='registry-v1'", ct).ConfigureAwait(false) != 1 ||
-                await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration WHERE NOT ((Version=1 AND Checksum='registry-v1') OR (Version=2 AND Checksum='operations-v2'))", ct).ConfigureAwait(false) != 0)
+                await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration WHERE NOT ((Version=1 AND Checksum='registry-v1') OR (Version=2 AND Checksum='operations-v2') OR (Version=3 AND Checksum='maintenance-v3'))", ct).ConfigureAwait(false) != 0 ||
+                await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration", ct).ConfigureAwait(false) != await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", ct).ConfigureAwait(false))
                 throw new InvalidOperationException("Database schema is unsupported.");
             // Preparing explicit projections rejects missing tables/columns without repairing user data.
             const string projections = """
@@ -187,7 +198,7 @@ public sealed class DbStore : IAsyncDisposable
                 command.CommandText = projection;
                 await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
             }
-            if (await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", ct).ConfigureAwait(false) == 2)
+            if (await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", ct).ConfigureAwait(false) >= 2)
             {
                 foreach (var projection in new[] {
                     "SELECT Id,DeviceId,RecordedAt,Status,CumulativeCount,Notes,Source,ImportBatchId,SimulationDatasetId,CreatedAtUtc FROM StatusRecord LIMIT 0",
@@ -195,6 +206,16 @@ public sealed class DbStore : IAsyncDisposable
                 {
                     await using var command = db.CreateCommand();
                     command.CommandText = projection;
+                    await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                }
+            }
+            if (await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", ct).ConfigureAwait(false) >= 3)
+            {
+                foreach (var projection in new[] {
+                    "SELECT Id,FaultNo,DeviceId,SourceAnomalyId,RegisteredAt,FaultType,Severity,Description,Status,StartedAt,ClosedAt,FinalResult,Revision,Source,ImportBatchId,SimulationDatasetId,CreatedAtUtc FROM Fault LIMIT 0",
+                    "SELECT Id,FaultId,RepairedAt,Action,Result,Technician,Notes,Source,ImportBatchId,SimulationDatasetId,CreatedAtUtc FROM Repair LIMIT 0" })
+                {
+                    await using var command = db.CreateCommand(); command.CommandText = projection;
                     await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 }
             }

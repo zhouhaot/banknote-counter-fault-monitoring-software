@@ -7,7 +7,7 @@
 [Setup]
 AppId={{BC7D9E66-230B-4F78-B9F3-CF362A53B248}
 AppName=点钞机运行状态监测与故障管理系统
-AppVersion=0.2.0
+AppVersion=0.3.0
 AppPublisher=点钞机软件项目
 DefaultDirName={localappdata}\Programs\MoneyCounterMonitor
 DefaultGroupName=点钞机运行状态监测与故障管理系统
@@ -16,7 +16,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.22000
 OutputDir={#OutputDir}
-OutputBaseFilename=MoneyCounterMonitor-0.2.0-win-x64-setup
+OutputBaseFilename=MoneyCounterMonitor-0.3.0-win-x64-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

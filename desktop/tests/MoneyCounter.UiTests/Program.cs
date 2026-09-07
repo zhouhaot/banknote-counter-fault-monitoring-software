@@ -60,6 +60,7 @@ internal static class Program
                 VerifyPersistedModel(main);
                 VerifyPersistedDevice(main);
                 VerifyPersistedOperations(main);
+                VerifyPersistedMaintenance(main);
                 CaptureWindow(main, Path.Combine(options.EvidenceDirectory, "persisted-device.png"));
                 CloseApplication(main);
             }
@@ -240,6 +241,7 @@ internal static class Program
             WaitUntil(() => Find(window, "OperationsFeedback").Current.Name == "异常已关闭，历史记录已保留", "anomaly closed");
             WaitForName(Find(window, "AnomalyHistory"), "已关闭");
             CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "anomaly-closed.png"));
+            ExerciseMaintenance(main, window);
             ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
             _steps.Add("Recorded status chronology, rejected backward historical reading with input preserved, and created/closed an anomaly in native UI.");
         }
@@ -264,6 +266,69 @@ internal static class Program
             Invoke(yes!);
             _steps.Add("Reopened and verified persisted status history and closed anomaly handling notes.");
             _steps.Add("Verified unsaved status input survives cancelling window closure, then explicitly discarded it.");
+        }
+
+        private void ExerciseMaintenance(AutomationElement main, AutomationElement operations)
+        {
+            SetValue(Find(operations, "DiscoveredAt"), "2026-01-01 11:00:00");
+            SetValue(Find(operations, "AnomalyDescription"), "UIA 待转故障");
+            Invoke(Find(operations, "SaveAnomaly"));
+            WaitUntil(() => Find(operations, "OperationsFeedback").Current.Name == "异常已登记", "second anomaly created");
+            var anomaly = Find(operations, "AnomalyHistory").FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem))!;
+            ((SelectionItemPattern)anomaly.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            Invoke(Find(operations, "ConvertAnomaly"));
+            var window = WaitForWindow(_process!.Id, "MaintenanceWindow");
+            WaitUntil(() => Find(window, "MaintenanceFeedback").Current.Name == "已刷新", "maintenance initialized");
+            Invoke(Find(window, "CreateFault"));
+            WaitUntil(() => Find(window, "MaintenanceFeedback").Current.Name == "故障已登记", "anomaly converted");
+            ((SelectionItemPattern)Find(window, "FaultDetailTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            SetValue(Find(window, "FaultActionAt"), "2026-01-01 11:10:00");
+            Invoke(Find(window, "StartFault"));
+            WaitUntil(() => Find(window, "MaintenanceFeedback").Current.Name == "已开始处理", "fault started");
+            SetValue(Find(window, "FaultClosedAt"), "2026-01-01 11:30:00");
+            SetValue(Find(window, "FaultFinalResult"), "UIA 测试确认恢复");
+            Invoke(Find(window, "CloseFault"));
+            ConfirmYes(main);
+            WaitUntil(() => Find(window, "MaintenanceFeedback").Current.Name.Contains("关闭前必须登记维修记录", StringComparison.Ordinal), "close without repair rejected");
+            SetValue(Find(window, "RepairAt"), "2026-01-01 11:20:00");
+            SetValue(Find(window, "RepairAction"), "UIA 清理传感器");
+            SetValue(Find(window, "RepairResult"), "UIA 点钞测试正常");
+            SetValue(Find(window, "RepairTechnician"), "UIA 维修员");
+            Invoke(Find(window, "SaveRepair"));
+            WaitUntil(() => Find(window, "MaintenanceFeedback").Current.Name == "维修记录已保存", "repair saved");
+            Invoke(Find(window, "CloseFault"));
+            ConfirmYes(main);
+            WaitUntil(() => Find(window, "MaintenanceFeedback").Current.Name == "故障已关闭", "fault closed");
+            if (Find(window, "SaveRepair").Current.IsEnabled || Find(window, "DeleteRepair").Current.IsEnabled) throw new InvalidOperationException("Closed fault permits repair editing.");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "fault-closed.png"));
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            WaitUntil(() => Find(operations, "OperationsFeedback").Current.Name == "历史记录已刷新", "conversion history refreshed");
+            WaitForName(Find(operations, "AnomalyHistory"), "已转故障");
+            _steps.Add("Converted anomaly to fault, started handling, rejected closure without repair, saved repair and closed with immutable history.");
+        }
+
+        private static void ConfirmYes(AutomationElement main)
+        {
+            AutomationElement? yes = null;
+            WaitUntil(() => (yes = main.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, "6"))) is not null, "confirmation dialog");
+            Invoke(yes!);
+        }
+
+        private void VerifyPersistedMaintenance(AutomationElement main)
+        {
+            WaitUntil(() => FindWindow(_process!.Id, "OperationsWindow") is null, "operations window closed");
+            Invoke(Find(main, "NavMaintenance"));
+            var window = WaitForWindow(_process!.Id, "MaintenanceWindow");
+            WaitUntil(() => Find(window, "MaintenanceFeedback").Current.Name == "已刷新", "persisted faults loaded");
+            var row = Find(window, "FaultGrid").FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem))!;
+            ((SelectionItemPattern)row.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            Invoke(Find(window, "OpenFault"));
+            WaitUntil(() => Find(window, "FaultDetailText").Current.Name.Contains("UIA 测试确认恢复", StringComparison.Ordinal), "persisted fault conclusion");
+            WaitForName(Find(window, "RepairGrid"), "UIA 清理传感器");
+            if (Find(window, "SaveRepair").Current.IsEnabled) throw new InvalidOperationException("Reopened closed fault is editable.");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "persisted-fault.png"));
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            _steps.Add("Reopened closed fault and verified persisted repair, final conclusion and read-only controls.");
         }
     }
 

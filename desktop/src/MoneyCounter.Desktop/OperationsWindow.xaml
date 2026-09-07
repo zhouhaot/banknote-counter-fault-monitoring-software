@@ -39,6 +39,7 @@
       <Label Content="关闭时间 *" Target="{Binding ElementName=ClosedTime}"/><TextBox x:Name="ClosedTime" Text="{Binding ClosedAt,UpdateSourceTrigger=PropertyChanged}" AutomationProperties.AutomationId="ClosedAt"/>
       <Label Content="处理说明 *" Target="{Binding ElementName=HandlingInput}"/><TextBox x:Name="HandlingInput" Text="{Binding HandlingNotes,UpdateSourceTrigger=PropertyChanged}" Height="80" AcceptsReturn="True" TextWrapping="Wrap" MaxLength="2000" AutomationProperties.AutomationId="HandlingNotes"/>
       <Button Content="关闭异常" Command="{Binding CloseAnomalyCommand}" AutomationProperties.AutomationId="CloseAnomaly"/>
+      <Button Content="将选中异常转为故障" Click="ConvertAnomaly_Click" AutomationProperties.AutomationId="ConvertAnomaly"/>
      </StackPanel></ScrollViewer>
     </Grid>
    </TabItem>

@@ -9,9 +9,10 @@ public partial class MainWindow : Window
     private readonly ILogger<RegistryEditor> _editorLogger;
     private readonly WindowPlacement _placement;
     private readonly Func<MoneyCounter.Core.Registry.DeviceDetail, OperationsViewModel> _operations;
-    public MainWindow(RegistryViewModel vm, ILogger<RegistryEditor> editorLogger, string windowPlacementPath, Func<MoneyCounter.Core.Registry.DeviceDetail, OperationsViewModel> operations)
+    private readonly Func<MoneyCounter.Core.Registry.DeviceDetail, MoneyCounter.Core.Operations.AnomalyDetail?, MaintenanceWindow> _maintenance;
+    public MainWindow(RegistryViewModel vm, ILogger<RegistryEditor> editorLogger, string windowPlacementPath, Func<MoneyCounter.Core.Registry.DeviceDetail, OperationsViewModel> operations, Func<MoneyCounter.Core.Registry.DeviceDetail, MoneyCounter.Core.Operations.AnomalyDetail?, MaintenanceWindow> maintenance)
     {
-        InitializeComponent(); _vm = vm; _editorLogger = editorLogger; _operations = operations; _placement = new WindowPlacement(windowPlacementPath); DataContext = vm;
+        InitializeComponent(); _vm = vm; _editorLogger = editorLogger; _operations = operations; _maintenance = maintenance; _placement = new WindowPlacement(windowPlacementPath); DataContext = vm;
         _placement.Restore(this);
         Loaded += (_, _) => _placement.EnsureVisible(this);
         Closing += (_, e) => { if (_vm.IsBusy) { e.Cancel = true; _vm.Status = "正在保存或查询，请等待完成后关闭。"; } };
@@ -22,7 +23,13 @@ public partial class MainWindow : Window
     {
         if (_vm.IsBusy) return;
         if (_vm.Section != 0 || _vm.SelectedDevice is not { } device) { _vm.Status = "请在设备台账中选择一台设备，再打开状态与异常。"; return; }
-        new OperationsWindow(_operations(device)) { Owner = this }.ShowDialog();
+        new OperationsWindow(_operations(device), a => _maintenance(device, a)) { Owner = this }.ShowDialog();
+    }
+    private void MaintenanceClick(object sender, RoutedEventArgs e)
+    {
+        if (_vm.IsBusy) return;
+        if (_vm.Section != 0 || _vm.SelectedDevice is not { } device) { _vm.Status = "请在设备台账中选择一台设备，再打开故障与维修。"; return; }
+        var window = _maintenance(device, null); window.Owner = this; window.ShowDialog();
     }
     private async void ModelsClick(object sender, RoutedEventArgs e) => await Navigate(1);
     private async Task Navigate(int section)
@@ -52,6 +59,6 @@ public partial class MainWindow : Window
     private void DeviceDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (_vm.SelectedDevice is not { } d) return;
-        MessageBox.Show(this, $"资产编号：{d.AssetCode}\n型号：{d.Manufacturer} {d.ModelName}\n位置：{d.Location}\n负责人：{d.ResponsiblePerson}\n备注：{d.Notes}\n\n状态、故障等历史页面尚在实施。", "设备详情");
+        MessageBox.Show(this, $"资产编号：{d.AssetCode}\n型号：{d.Manufacturer} {d.ModelName}\n位置：{d.Location}\n负责人：{d.ResponsiblePerson}\n备注：{d.Notes}\n\n可通过左侧的状态与异常、故障与维修查看业务历史。", "设备详情");
     }
 }
