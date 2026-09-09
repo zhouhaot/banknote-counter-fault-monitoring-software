@@ -56,7 +56,7 @@ public sealed class SqliteRegistryService(DbStore store) : IRegistryService
         ExecuteAsync(command.OperationId, command, "Device", async (db, tx, token) =>
         {
             if (string.IsNullOrWhiteSpace(command.AssetCode)) return Invalid<DeviceDetail>("AssetCode");
-            if (!await IsActiveModelAsync(db, tx, command.ModelId, token)) return Result<DeviceDetail>.Failure(ErrorCodes.RecordNotFound, "型号不存在或已停用。", "ModelId");
+            if (!await IsActiveModelAsync(db, tx, command.ModelId, token)) return Result<DeviceDetail>.Failure(ErrorCodes.RecordNotFound, "型号不存在、已停用或属于模拟数据。", "ModelId");
             try
             {
                 var id = await InsertAsync(db, tx, "INSERT INTO Device(AssetCode,ModelId,CommissionedOn,PurchasedOn,Location,ResponsiblePerson,Notes,IsActive,Revision,Source,CreatedAtUtc,UpdatedAtUtc) VALUES($asset,$model,$commissioned,$purchased,$location,$person,$notes,1,0,'MANUAL',$now,$now); SELECT last_insert_rowid();", token,
@@ -70,7 +70,8 @@ public sealed class SqliteRegistryService(DbStore store) : IRegistryService
         ExecuteAsync(command.OperationId, command, "Device", async (db, tx, token) =>
         {
             if (string.IsNullOrWhiteSpace(command.AssetCode)) return Invalid<DeviceDetail>("AssetCode");
-            if (!await IsActiveModelAsync(db, tx, command.ModelId, token)) return Result<DeviceDetail>.Failure(ErrorCodes.RecordNotFound, "型号不存在或已停用。", "ModelId");
+            if (await ScalarLongAsync(db, tx, "SELECT COUNT(*) FROM Model m JOIN Device d ON d.Id=$device WHERE m.Id=$model AND m.IsActive=1 AND (m.Source='SIMULATED')=(d.Source='SIMULATED') AND (m.Source<>'SIMULATED' OR m.SimulationDatasetId=d.SimulationDatasetId)", token, ("$device", command.Id), ("$model", command.ModelId)) != 1)
+                return Result<DeviceDetail>.Failure(ErrorCodes.SourceMismatch, "型号不存在、已停用或与设备数据来源不匹配。", "ModelId");
             try
             {
                 var affected = await NonQueryAsync(db, tx, "UPDATE Device SET AssetCode=$asset,ModelId=$model,CommissionedOn=$commissioned,PurchasedOn=$purchased,Location=$location,ResponsiblePerson=$person,Notes=$notes,Revision=Revision+1,UpdatedAtUtc=$now WHERE Id=$id AND Revision=$revision", token,
@@ -145,7 +146,7 @@ public sealed class SqliteRegistryService(DbStore store) : IRegistryService
         return Result<PagedResult<DeviceDetail>>.Success(new(items,q.Page,q.PageSize,total));
     }
 
-    private static async Task<bool> IsActiveModelAsync(SqliteConnection db, SqliteTransaction tx, long id, CancellationToken ct) => await ScalarLongAsync(db, tx, "SELECT COUNT(*) FROM Model WHERE Id=$id AND IsActive=1", ct, ("$id",id)) == 1;
+    private static async Task<bool> IsActiveModelAsync(SqliteConnection db, SqliteTransaction tx, long id, CancellationToken ct) => await ScalarLongAsync(db, tx, "SELECT COUNT(*) FROM Model WHERE Id=$id AND IsActive=1 AND Source<>'SIMULATED'", ct, ("$id",id)) == 1;
     private static async Task<Result<T>> RevisionFailureAsync<T>(SqliteConnection db, SqliteTransaction tx, long id, string table, CancellationToken ct) => await ScalarLongAsync(db, tx, $"SELECT COUNT(*) FROM {table} WHERE Id=$id", ct, ("$id",id)) == 0 ? Result<T>.Failure(ErrorCodes.RecordNotFound, "记录不存在。") : Result<T>.Failure(ErrorCodes.ConcurrentChange, "记录已被其他操作更新。", "Revision");
     private static Result<T> Invalid<T>(string field) => Result<T>.Failure(ErrorCodes.InvalidRecord, "字段无效。", field);
     private static bool ValidPage(int page, int size) => page > 0 && size is > 0 and <= 200;

@@ -143,7 +143,7 @@ public sealed class MaintenanceTests : IAsyncLifetime
         await store.WriteAsync(async (db, tx, ct) =>
         {
             using var query = db.CreateCommand(); query.Transaction = tx;
-            query.CommandText = "INSERT INTO SimulationDataset(Id) VALUES(1); UPDATE Device SET Source='SIMULATED',SimulationDatasetId=1 WHERE Id=$id";
+            query.CommandText = "INSERT INTO SimulationDataset(Id) VALUES(1); UPDATE Model SET Source='SIMULATED',SimulationDatasetId=1 WHERE Id=(SELECT ModelId FROM Device WHERE Id=$id); UPDATE Device SET Source='SIMULATED',SimulationDatasetId=1 WHERE Id=$id";
             query.Parameters.AddWithValue("$id", device);
             return await query.ExecuteNonQueryAsync(ct);
         }, Ct);

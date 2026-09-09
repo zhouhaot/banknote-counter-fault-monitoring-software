@@ -13,9 +13,11 @@
    <Button Content="状态与异常" Click="OperationsClick" AutomationProperties.AutomationId="NavOperations"/>
    <Button Content="故障与维修" Click="MaintenanceClick" AutomationProperties.AutomationId="NavMaintenance"/>
    <Button Content="耗材库存" Click="InventoryClick" AutomationProperties.AutomationId="NavInventory"/>
+   <Button Content="CSV 数据导入" Click="ImportsClick" AutomationProperties.AutomationId="NavImports"/>
+   <Button Content="演示数据" Click="SimulationClick" AutomationProperties.AutomationId="NavSimulation"/>
    <TextBlock Text="后续业务模块实施中" Margin="8,28,0,8"/>
-   <TextBlock Text="统计分析&#10;数据导入&#10;备份与恢复" LineHeight="32" Margin="8"/>
-   <TextBlock Text="开发预览版 0.4.0&#10;状态为人工业务记录" Margin="8,32,0,0"/>
+   <TextBlock Text="统计分析&#10;备份与恢复" LineHeight="32" Margin="8"/>
+   <TextBlock Text="开发预览版 0.5.0&#10;状态为人工业务记录" Margin="8,32,0,0"/>
   </StackPanel></Border>
   <Grid Margin="24"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
    <DockPanel><TextBlock Text="{Binding Title}" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>

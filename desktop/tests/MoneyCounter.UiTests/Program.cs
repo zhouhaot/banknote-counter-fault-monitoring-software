@@ -62,6 +62,8 @@ internal static class Program
                 VerifyPersistedOperations(main);
                 VerifyPersistedMaintenance(main);
                 VerifyPersistedInventory(main);
+                ExerciseImports(main);
+                ExerciseSimulation(main);
                 CaptureWindow(main, Path.Combine(options.EvidenceDirectory, "persisted-device.png"));
                 CloseApplication(main);
             }
@@ -318,7 +320,7 @@ internal static class Program
             SetValue(Find(window, "ConsumableName"), "UIA 清洁布");
             SetValue(Find(window, "ConsumableUnit"), "包");
             Invoke(Find(window, "SaveConsumable"));
-            WaitForName(Find(window, "ConsumableGrid"), "UIA 清洁布");
+            WaitForGridName(window, "ConsumableGrid", "UIA 清洁布");
             SelectFirstRow(Find(window, "ConsumableGrid"));
             SetValue(Find(window, "MovementQuantity"), "1.25");
             SetValue(Find(window, "MovementTime"), "2026-01-01 11:21:00");
@@ -329,7 +331,7 @@ internal static class Program
             SetValue(Find(window, "ConsumableName"), "UIA 备用耗材");
             SetValue(Find(window, "ConsumableUnit"), "包");
             Invoke(Find(window, "SaveConsumable"));
-            WaitForName(Find(window, "ConsumableGrid"), "UIA 备用耗材");
+            WaitForGridName(window, "ConsumableGrid", "UIA 备用耗材");
             SetValue(Find(window, "ConsumableSearch"), "UIA 备用耗材");
             Invoke(Find(window, "SearchConsumables"));
             WaitUntil(() => Find(window, "ConsumableGrid").FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)).Count == 1, "filtered inventory catalog");
@@ -351,19 +353,19 @@ internal static class Program
             if (((ValuePattern)Find(window, "MovementQuantity").GetCurrentPattern(ValuePattern.Pattern)).Current.Value != "1.25") throw new InvalidOperationException("Cancelled target switch lost quantity.");
             SetValue(Find(window, "ConsumableSearch"), "UIA 清洁布");
             Invoke(Find(window, "SearchConsumables"));
-            WaitForName(Find(window, "ConsumableGrid"), "UIA 清洁布");
+            WaitForGridName(window, "ConsumableGrid", "UIA 清洁布");
             SelectFirstRow(Find(window, "ConsumableGrid"));
             SelectChoice(Find(window, "MovementType"), "入库");
             SetValue(Find(window, "MovementQuantity"), "10");
             SetValue(Find(window, "MovementReason"), "UIA 入库");
             Invoke(Find(window, "PostMovement"));
-            WaitForName(Find(window, "ConsumableGrid"), "10.00");
+            WaitForGridName(window, "ConsumableGrid", "10.00");
             SelectChoice(Find(window, "MovementType"), "领用（扣减）");
             SetValue(Find(window, "MovementQuantity"), "1.25");
             SetValue(Find(window, "MovementTime"), "2026-01-01 11:22:00");
             SetValue(Find(window, "MovementReason"), "UIA 领用");
             Invoke(Find(window, "PostMovement"));
-            WaitForName(Find(window, "ConsumableGrid"), "8.75");
+            WaitForGridName(window, "ConsumableGrid", "8.75");
             ((SelectionItemPattern)Find(window, "InventoryLedgerTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
             SelectFirstRow(Find(window, "InventoryLedger"));
             SetValue(Find(window, "MovementTime"), "2026-01-01 11:23:00");
@@ -381,11 +383,79 @@ internal static class Program
             Invoke(Find(main, "NavInventory"));
             var window = WaitForWindow(_process!.Id, "InventoryWindow");
             WaitUntil(() => Find(window, "InventoryFeedback").Current.Name == "已刷新库存与流水", "persisted inventory loaded");
-            WaitForName(Find(window, "ConsumableGrid"), "10.00");
+            WaitForGridName(window, "ConsumableGrid", "10.00");
             ((SelectionItemPattern)Find(window, "InventoryLedgerTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
             foreach (var reason in new[] { "UIA 入库", "UIA 领用", "UIA 冲正领用" }) WaitForName(Find(window, "InventoryLedger"), reason);
             ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
             _steps.Add("Reopened inventory and verified balance 10.00 with all three immutable ledger entries.");
+        }
+
+        private void ExerciseImports(AutomationElement main)
+        {
+            var csv = Path.Combine(options.EvidenceDirectory, "UIA-import.csv");
+            File.WriteAllText(csv, "manufacturer,model_name,rated_count_life,notes\r\nUIA CSV厂商,UIA-CSV-MODEL,abc,无效寿命\r\n", new System.Text.UTF8Encoding(true));
+            Invoke(Find(main, "NavImports"));
+            var window = WaitForWindow(_process!.Id, "ImportWindow");
+            WaitUntil(() => Find(window, "PreviewCsv").Current.IsEnabled, "import page ready");
+            SetValue(Find(window, "CsvPath"), csv);
+            Invoke(Find(window, "PreviewCsv"));
+            WaitUntil(() => Find(window, "ImportFeedback").Current.Name.Contains("发现", StringComparison.Ordinal), "invalid import preview");
+            if (Find(window, "CommitCsv").Current.IsEnabled) throw new InvalidOperationException("Invalid CSV permits commit.");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "csv-errors.png"));
+            File.WriteAllText(csv, "manufacturer,model_name,rated_count_life,notes\r\nUIA CSV厂商,UIA-CSV-MODEL,100000,测试导入\r\n", new System.Text.UTF8Encoding(true));
+            Invoke(Find(window, "PreviewCsv"));
+            WaitUntil(() => Find(window, "CommitCsv").Current.IsEnabled, "valid import preview");
+            File.AppendAllText(csv, "UIA CSV厂商,UIA-CHANGED,200000,预览后修改\r\n");
+            Invoke(Find(window, "CommitCsv"));
+            WaitUntil(() => Find(window, "ImportFeedback").Current.Name.Contains("文件内容已改变", StringComparison.Ordinal), "changed CSV rejected");
+            File.WriteAllText(csv, "manufacturer,model_name,rated_count_life,notes\r\nUIA CSV厂商,UIA-CSV-MODEL,100000,测试导入\r\n", new System.Text.UTF8Encoding(true));
+            Invoke(Find(window, "PreviewCsv"));
+            WaitUntil(() => Find(window, "CommitCsv").Current.IsEnabled, "corrected CSV revalidated");
+            Invoke(Find(window, "CommitCsv"));
+            WaitUntil(() => Find(window, "ImportFeedback").Current.Name.StartsWith("导入成功", StringComparison.Ordinal), "CSV committed");
+            ((SelectionItemPattern)Find(window, "ImportHistoryTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            WaitForName(Find(window, "ImportHistory"), "UIA-import.csv");
+            void ImportFile(string kind, string name, string content)
+            {
+                var path = Path.Combine(options.EvidenceDirectory, name);
+                File.WriteAllText(path, content, new System.Text.UTF8Encoding(true));
+                SelectChoice(Find(window, "ImportKind"), kind);
+                SetValue(Find(window, "CsvPath"), path);
+                Invoke(Find(window, "PreviewCsv"));
+                WaitUntil(() => Find(window, "CommitCsv").Current.IsEnabled, "valid " + kind + " preview");
+                Invoke(Find(window, "CommitCsv"));
+                WaitUntil(() => Find(window, "ImportFeedback").Current.Name.StartsWith("导入成功", StringComparison.Ordinal), kind + " committed");
+                WaitForName(Find(window, "ImportHistory"), name);
+            }
+            ImportFile("设备台账", "UIA-devices.csv", "asset_code,manufacturer,model_name,commissioned_on,purchased_on,location,responsible_person,notes\r\nUIA-CSV-DEVICE,UIA CSV厂商,UIA-CSV-MODEL,2026-01-01,,测试地点,测试负责人,\r\n");
+            ImportFile("状态记录", "UIA-statuses.csv", "asset_code,recorded_at,status,cumulative_count,notes\r\nUIA-CSV-DEVICE,2026-01-01T08:00:00+08:00,RUNNING,100,第一条\r\nUIA-CSV-DEVICE,2026-01-01T09:00:00+08:00,STOPPED,200,第二条\r\n");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "csv-committed.png"));
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            _steps.Add("Rejected invalid CSV and changed-after-preview content; imported model, device and statuses and verified all three committed batches in native UI.");
+        }
+
+        private void ExerciseSimulation(AutomationElement main)
+        {
+            Invoke(Find(main, "NavSimulation"));
+            var window = WaitForWindow(_process!.Id, "SimulationWindow");
+            Invoke(Find(window, "CreateSimulation"));
+            WaitUntil(() => Find(window, "SimulationFeedback").Current.Name.StartsWith("模拟集已创建", StringComparison.Ordinal), "simulation created");
+            WaitForName(Find(window, "SimulationGrid"), "模拟集 20260826");
+            SelectFirstRow(Find(window, "SimulationGrid"));
+            Invoke(Find(window, "ResetSimulation"));
+            ConfirmYes(main);
+            WaitUntil(() => Find(window, "SimulationFeedback").Current.Name.StartsWith("模拟集已清除", StringComparison.Ordinal), "simulation reset");
+            WaitUntil(() => Find(window, "CreateSimulation").Current.IsEnabled && Find(window, "SimulationGrid").FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)).Count == 0, "simulation list cleared after refresh");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "simulation-reset.png"));
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            Invoke(Find(main, "NavModels"));
+            SetValue(Find(main, "SearchBox"), "UIA-CSV-MODEL");
+            Invoke(Find(main, "SearchButton"));
+            WaitForName(Find(main, "ModelsGrid"), "UIA-CSV-MODEL");
+            SetValue(Find(main, "SearchBox"), _modelName);
+            Invoke(Find(main, "SearchButton"));
+            WaitForName(Find(main, "ModelsGrid"), _modelName);
+            _steps.Add("Created and reset isolated simulation dataset through native UI; confirmed imported and manual models retained.");
         }
 
         private static void SelectFirstRow(AutomationElement grid)
@@ -481,6 +551,8 @@ internal static class Program
         ((ValuePattern)pattern).SetValue(value);
     }
 
+    private static void WaitForGridName(AutomationElement window, string gridId, string expected) => WaitUntil(() => Find(window, gridId).FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, expected)) is not null, "grid content " + expected);
+
     private static void WaitForName(AutomationElement root, string expected) => WaitUntil(() => root.FindFirst(TreeScope.Descendants,
         new PropertyCondition(AutomationElement.NameProperty, expected)) is not null, $"text '{expected}'");
 
@@ -491,7 +563,9 @@ internal static class Program
         var until = Stopwatch.StartNew();
         while (until.ElapsedMilliseconds < TimeoutMilliseconds)
         {
-            try { if (condition()) return; } catch (ElementNotAvailableException) { }
+            try { if (condition()) return; }
+            catch (ElementNotAvailableException) { }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("Automation element '", StringComparison.Ordinal)) { }
             Thread.Sleep(100);
         }
         throw new TimeoutException($"Timed out waiting for {description}.");

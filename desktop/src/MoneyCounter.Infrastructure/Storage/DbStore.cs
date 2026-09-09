@@ -2,6 +2,8 @@ using Microsoft.Data.Sqlite;
 using MoneyCounter.Infrastructure.Operations;
 using MoneyCounter.Infrastructure.Maintenance;
 using MoneyCounter.Infrastructure.Inventory;
+using MoneyCounter.Infrastructure.Imports;
+using MoneyCounter.Infrastructure.Simulation;
 
 namespace MoneyCounter.Infrastructure.Storage;
 
@@ -72,6 +74,18 @@ public sealed class DbStore : IAsyncDisposable
                 await migration.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
+            foreach (var step in new[] { (Version: 5, Checksum: "imports-v5", Sql: ImportMigration.Sql), (Version: 6, Checksum: "simulation-v6", Sql: SimulationMigration.Sql) })
+            {
+                if (await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", cancellationToken).ConfigureAwait(false) != step.Version - 1) continue;
+                await using var transaction = db.BeginTransaction();
+                await using var migration = db.CreateCommand(); migration.Transaction = transaction;
+                migration.CommandText = step.Sql + "\nINSERT INTO SchemaMigration VALUES($version,$checksum,$now);";
+                migration.Parameters.AddWithValue("$version", step.Version);
+                migration.Parameters.AddWithValue("$checksum", step.Checksum);
+                migration.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+                await migration.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
             await ExecuteAsync(db, "PRAGMA journal_mode=WAL;", cancellationToken).ConfigureAwait(false);
         }
         finally { _writeGate.Release(); }
@@ -117,6 +131,7 @@ public sealed class DbStore : IAsyncDisposable
         try
         {
             await db.OpenAsync(ct).ConfigureAwait(false);
+            db.CreateFunction<long?>("simulation_reset_dataset", () => null);
             await ExecuteAsync(db, "PRAGMA busy_timeout=5000;", ct).ConfigureAwait(false);
             return db;
         }
@@ -190,7 +205,7 @@ public sealed class DbStore : IAsyncDisposable
         try
         {
             if (await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration WHERE Version=1 AND Checksum='registry-v1'", ct).ConfigureAwait(false) != 1 ||
-                await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration WHERE NOT ((Version=1 AND Checksum='registry-v1') OR (Version=2 AND Checksum='operations-v2') OR (Version=3 AND Checksum='maintenance-v3') OR (Version=4 AND Checksum='inventory-v4'))", ct).ConfigureAwait(false) != 0 ||
+                await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration WHERE NOT ((Version=1 AND Checksum='registry-v1') OR (Version=2 AND Checksum='operations-v2') OR (Version=3 AND Checksum='maintenance-v3') OR (Version=4 AND Checksum='inventory-v4') OR (Version=5 AND Checksum='imports-v5') OR (Version=6 AND Checksum='simulation-v6'))", ct).ConfigureAwait(false) != 0 ||
                 await ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration", ct).ConfigureAwait(false) != await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", ct).ConfigureAwait(false))
                 throw new InvalidOperationException("Database schema is unsupported.");
             // Preparing explicit projections rejects missing tables/columns without repairing user data.
@@ -240,6 +255,21 @@ public sealed class DbStore : IAsyncDisposable
                 }
                 if (await ScalarAsync(db, "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN ('InventoryMovement_NoUpdate','InventoryMovement_NoDelete','InventoryMovement_Validate','Consumable_KeepHistory','Consumable_StableSource')", ct).ConfigureAwait(false) != 5)
                     throw new InvalidOperationException("Inventory integrity triggers are missing.");
+            }
+            var version = await ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", ct).ConfigureAwait(false);
+            if (version >= 5)
+            {
+                await using var command = db.CreateCommand();
+                command.CommandText = "SELECT Id,Kind,FileName,Sha256,RowCount,ImportedAtUtc FROM ImportBatch LIMIT 0";
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            }
+            if (version >= 6)
+            {
+                await using var command = db.CreateCommand();
+                command.CommandText = "SELECT Id,Seed,Name,CreatedAtUtc,GeneratorVersion FROM SimulationDataset LIMIT 0";
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await ScalarAsync(db, "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN ('Device_ValidateSource_Insert','Device_ValidateSource_Update')", ct).ConfigureAwait(false) != 2)
+                    throw new InvalidOperationException("Device source integrity triggers are missing.");
             }
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 1)

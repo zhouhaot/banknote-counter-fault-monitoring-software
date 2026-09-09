@@ -63,7 +63,7 @@ public sealed class OperationsTests : IAsyncLifetime
     public async Task UnknownAndSimulatedDevicesRejectManualRecords()
     {
         Assert.False((await service.RecordStatusAsync(new(Guid.NewGuid(), 999, time, "RUNNING", 1, ""), Ct)).IsSuccess);
-        await store.WriteAsync(async (db, tx, ct) => { using var cmd = db.CreateCommand(); cmd.Transaction = tx; cmd.CommandText = "INSERT INTO SimulationDataset(Id) VALUES(1); UPDATE Device SET Source='SIMULATED',SimulationDatasetId=1 WHERE Id=$id"; cmd.Parameters.AddWithValue("$id", device); return await cmd.ExecuteNonQueryAsync(ct); }, Ct);
+        await store.WriteAsync(async (db, tx, ct) => { using var cmd = db.CreateCommand(); cmd.Transaction = tx; cmd.CommandText = "INSERT INTO SimulationDataset(Id) VALUES(1); UPDATE Model SET Source='SIMULATED',SimulationDatasetId=1 WHERE Id=(SELECT ModelId FROM Device WHERE Id=$id); UPDATE Device SET Source='SIMULATED',SimulationDatasetId=1 WHERE Id=$id"; cmd.Parameters.AddWithValue("$id", device); return await cmd.ExecuteNonQueryAsync(ct); }, Ct);
         Assert.Equal(MoneyCounter.Core.ErrorCodes.SourceMismatch, (await Add(0, 1)).Error!.Code);
         Assert.False((await service.CreateAnomalyAsync(new(Guid.NewGuid(), device, time, "异常"), Ct)).IsSuccess);
     }

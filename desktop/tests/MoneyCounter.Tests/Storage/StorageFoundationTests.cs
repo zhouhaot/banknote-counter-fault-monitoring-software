@@ -5,6 +5,46 @@ namespace MoneyCounter.Tests.Storage;
 
 public sealed class StorageFoundationTests
 {
+    [Fact]
+    public async Task VersionFourUpgradePreservesInventoryAndKeepsRealLedgerImmutable()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var path = TempPath();
+        try
+        {
+            await using (var setup = new DbStore(path))
+            {
+                await setup.InitializeAsync(ct);
+                var inventory = new MoneyCounter.Infrastructure.Inventory.SqliteInventoryService(setup);
+                var item = (await inventory.CreateConsumableAsync(new(Guid.NewGuid(), "升级保留耗材", "个", ""), ct)).Value!;
+                Assert.True((await inventory.PostMovementAsync(new(Guid.NewGuid(), item.Id, "INBOUND", 12.34m, DateTimeOffset.UtcNow, "升级前入库"), ct)).IsSuccess);
+                await setup.WriteAsync(async (db, tx, token) =>
+                {
+                    using var command = db.CreateCommand(); command.Transaction = tx;
+                    command.CommandText = """
+                        DROP TRIGGER Device_ValidateSource_Insert; DROP TRIGGER Device_ValidateSource_Update;
+                        DROP TRIGGER InventoryMovement_NoDelete;
+                        CREATE TRIGGER InventoryMovement_NoDelete BEFORE DELETE ON InventoryMovement BEGIN SELECT RAISE(ABORT,'Inventory ledger is immutable'); END;
+                        DROP TABLE ImportBatch; CREATE TABLE ImportBatch(Id INTEGER PRIMARY KEY);
+                        DROP TABLE SimulationDataset; CREATE TABLE SimulationDataset(Id INTEGER PRIMARY KEY);
+                        DELETE FROM SchemaMigration WHERE Version>=5;
+                        """;
+                    return await command.ExecuteNonQueryAsync(token);
+                }, ct);
+            }
+            await using var upgraded = new DbStore(path);
+            await upgraded.InitializeAsync(ct);
+            Assert.Equal(6L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT MAX(Version) FROM SchemaMigration", token), ct));
+            Assert.Equal(1234L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT SUM(QuantityMinor) FROM InventoryMovement", token), ct));
+            await Assert.ThrowsAsync<SqliteException>(() => upgraded.WriteAsync(async (db, tx, token) =>
+            {
+                using var command = db.CreateCommand(); command.Transaction = tx; command.CommandText = "DELETE FROM InventoryMovement";
+                return await command.ExecuteNonQueryAsync(token);
+            }, ct));
+        }
+        finally { File.Delete(path); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -22,7 +62,7 @@ public sealed class StorageFoundationTests
                 await setup.WriteAsync(async (db, tx, token) =>
                 {
                     using var command = db.CreateCommand(); command.Transaction = tx;
-                    command.CommandText = "DROP TABLE InventoryMovement; DROP TABLE Consumable; DROP TABLE Repair; DROP TABLE Fault; DROP TABLE StatusRecord; DROP TABLE Anomaly; DELETE FROM SchemaMigration WHERE Version>=2;" + (conflict ? "CREATE VIEW Anomaly AS SELECT 1 AS Id;" : "");
+                    command.CommandText = "DROP TRIGGER Device_ValidateSource_Insert; DROP TRIGGER Device_ValidateSource_Update; DROP TABLE InventoryMovement; DROP TABLE Consumable; DROP TABLE Repair; DROP TABLE Fault; DROP TABLE StatusRecord; DROP TABLE Anomaly; DROP TABLE ImportBatch; CREATE TABLE ImportBatch(Id INTEGER PRIMARY KEY); DROP TABLE SimulationDataset; CREATE TABLE SimulationDataset(Id INTEGER PRIMARY KEY); DELETE FROM SchemaMigration WHERE Version>=2;" + (conflict ? "CREATE VIEW Anomaly AS SELECT 1 AS Id;" : "");
                     return await command.ExecuteNonQueryAsync(token);
                 }, ct);
             }
@@ -30,7 +70,7 @@ public sealed class StorageFoundationTests
             if (conflict) await Assert.ThrowsAsync<SqliteException>(() => upgraded.InitializeAsync(ct));
             else await upgraded.InitializeAsync(ct);
             Assert.Equal(1L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM Model WHERE Notes='原始备注'", token), ct));
-            Assert.Equal(conflict ? 1L : 4L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration", token), ct));
+            Assert.Equal(conflict ? 1L : 6L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM SchemaMigration", token), ct));
             Assert.Equal(conflict ? 0L : 1L, await upgraded.ReadAsync((db, token) => ScalarAsync(db, "SELECT COUNT(*) FROM sqlite_master WHERE name='StatusRecord'", token), ct));
         }
         finally { File.Delete(path); }
@@ -145,7 +185,7 @@ public sealed class StorageFoundationTests
             await connection.OpenAsync(TestContext.Current.CancellationToken);
             Assert.Equal(1L, await ScalarAsync(connection, "PRAGMA foreign_keys", TestContext.Current.CancellationToken));
             Assert.Equal("wal", ((string)(await ScalarObjectAsync(connection, "PRAGMA journal_mode", TestContext.Current.CancellationToken))!).ToLowerInvariant());
-            Assert.Equal(4L, await ScalarAsync(connection, "SELECT COUNT(*) FROM SchemaMigration", TestContext.Current.CancellationToken));
+            Assert.Equal(6L, await ScalarAsync(connection, "SELECT COUNT(*) FROM SchemaMigration", TestContext.Current.CancellationToken));
         }
         File.Delete(path);
     }

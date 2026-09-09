@@ -11,9 +11,10 @@ public partial class MainWindow : Window
     private readonly Func<MoneyCounter.Core.Registry.DeviceDetail, OperationsViewModel> _operations;
     private readonly Func<MoneyCounter.Core.Registry.DeviceDetail, MoneyCounter.Core.Operations.AnomalyDetail?, MaintenanceWindow> _maintenance;
     private readonly Func<MoneyCounter.Core.Registry.DeviceDetail?, MoneyCounter.Core.Maintenance.FaultDetail?, Window> _inventory;
-    public MainWindow(RegistryViewModel vm, ILogger<RegistryEditor> editorLogger, string windowPlacementPath, Func<MoneyCounter.Core.Registry.DeviceDetail, OperationsViewModel> operations, Func<MoneyCounter.Core.Registry.DeviceDetail, MoneyCounter.Core.Operations.AnomalyDetail?, MaintenanceWindow> maintenance, Func<MoneyCounter.Core.Registry.DeviceDetail?, MoneyCounter.Core.Maintenance.FaultDetail?, Window> inventory)
+    private readonly Func<Window> _imports, _simulation;
+    public MainWindow(RegistryViewModel vm, ILogger<RegistryEditor> editorLogger, string windowPlacementPath, Func<MoneyCounter.Core.Registry.DeviceDetail, OperationsViewModel> operations, Func<MoneyCounter.Core.Registry.DeviceDetail, MoneyCounter.Core.Operations.AnomalyDetail?, MaintenanceWindow> maintenance, Func<MoneyCounter.Core.Registry.DeviceDetail?, MoneyCounter.Core.Maintenance.FaultDetail?, Window> inventory, Func<Window> imports, Func<Window> simulation)
     {
-        InitializeComponent(); _vm = vm; _editorLogger = editorLogger; _operations = operations; _maintenance = maintenance; _inventory = inventory; _placement = new WindowPlacement(windowPlacementPath); DataContext = vm;
+        InitializeComponent(); _vm = vm; _editorLogger = editorLogger; _operations = operations; _maintenance = maintenance; _inventory = inventory; _imports = imports; _simulation = simulation; _placement = new WindowPlacement(windowPlacementPath); DataContext = vm;
         _placement.Restore(this);
         Loaded += (_, _) => _placement.EnsureVisible(this);
         Closing += (_, e) => { if (_vm.IsBusy) { e.Cancel = true; _vm.Status = "正在保存或查询，请等待完成后关闭。"; } };
@@ -38,6 +39,14 @@ public partial class MainWindow : Window
         var window = _inventory(null, null); window.Owner = this; window.ShowDialog();
     }
     private async void ModelsClick(object sender, RoutedEventArgs e) => await Navigate(1);
+    private async void ImportsClick(object sender, RoutedEventArgs e) => await OpenDataWindow(_imports);
+    private async void SimulationClick(object sender, RoutedEventArgs e) => await OpenDataWindow(_simulation);
+    private async Task OpenDataWindow(Func<Window> factory)
+    {
+        if (_vm.IsBusy) return;
+        var window = factory(); window.Owner = this; window.ShowDialog();
+        await _vm.RefreshAsync();
+    }
     private async Task Navigate(int section)
     {
         if (_vm.IsBusy) return;

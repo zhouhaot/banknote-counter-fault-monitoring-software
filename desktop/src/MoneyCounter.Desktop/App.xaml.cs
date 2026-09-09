@@ -9,6 +9,10 @@ using MoneyCounter.Core.Maintenance;
 using MoneyCounter.Infrastructure.Maintenance;
 using MoneyCounter.Core.Inventory;
 using MoneyCounter.Infrastructure.Inventory;
+using MoneyCounter.Core.Imports;
+using MoneyCounter.Infrastructure.Imports;
+using MoneyCounter.Core.Simulation;
+using MoneyCounter.Infrastructure.Simulation;
 using MoneyCounter.Infrastructure.Storage;
 using MoneyCounter.Desktop.Infrastructure;
 using MoneyCounter.Desktop.ViewModels;
@@ -42,6 +46,8 @@ public partial class App : Application
             services.AddSingleton<IOperationsService, SqliteOperationsService>();
             services.AddSingleton<IMaintenanceService, SqliteMaintenanceService>();
             services.AddSingleton<IInventoryService, SqliteInventoryService>();
+            services.AddSingleton<ICsvImportService, SqliteCsvImportService>();
+            services.AddSingleton<ISimulationService, SqliteSimulationService>();
             services.AddSingleton<RegistryViewModel>();
             _services = services.BuildServiceProvider();
             await _services.GetRequiredService<DbStore>().InitializeAsync();
@@ -57,7 +63,9 @@ public partial class App : Application
             }
             var window = new MainWindow(vm, _services.GetRequiredService<ILogger<RegistryEditor>>(), Path.Combine(configDir, "window-placement.json"),
                 d => new OperationsViewModel(d, _services.GetRequiredService<IOperationsService>(), _services.GetRequiredService<ILogger<OperationsViewModel>>()),
-                Maintenance, Inventory); MainWindow = window;
+                Maintenance, Inventory,
+                () => new ImportWindow(_services.GetRequiredService<ICsvImportService>(), _services.GetRequiredService<ILogger<ImportViewModel>>()),
+                () => new SimulationWindow(_services.GetRequiredService<ISimulationService>(), _services.GetRequiredService<ILogger<SimulationViewModel>>())); MainWindow = window;
             _instance.StartActivationListener(window); window.Show();
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             await vm.RefreshAsync();
