@@ -16,7 +16,7 @@
    <Button Content="CSV 数据导入" Click="ImportsClick" AutomationProperties.AutomationId="NavImports"/>
    <Button Content="演示数据" Click="SimulationClick" AutomationProperties.AutomationId="NavSimulation"/>
    <TextBlock Text="后续业务模块实施中" Margin="8,28,0,8"/>
-   <TextBlock Text="统计分析&#10;备份与恢复" LineHeight="32" Margin="8"/>
+   <Button Content="统计分析" Click="AnalyticsClick" AutomationProperties.AutomationId="NavAnalytics"/><TextBlock Text="备份与恢复" LineHeight="32" Margin="8"/>
    <TextBlock Text="开发预览版 0.5.0&#10;状态为人工业务记录" Margin="8,32,0,0"/>
   </StackPanel></Border>
   <Grid Margin="24"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

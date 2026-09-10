@@ -64,6 +64,7 @@ internal static class Program
                 VerifyPersistedInventory(main);
                 ExerciseImports(main);
                 ExerciseSimulation(main);
+                ExerciseAnalytics(main);
                 CaptureWindow(main, Path.Combine(options.EvidenceDirectory, "persisted-device.png"));
                 CloseApplication(main);
             }
@@ -92,6 +93,31 @@ internal static class Program
         {
             var report = new { passed, executable = options.Executable, dataDirectory = options.DataDirectory, steps = _steps, error = error?.ToString() };
             File.WriteAllText(Path.Combine(options.EvidenceDirectory, "ui-smoke-report.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+        }
+
+        private void ExerciseAnalytics(AutomationElement main)
+        {
+            Invoke(Find(main, "NavAnalytics"));
+            var window = WaitForWindow(_process!.Id, "AnalyticsWindow");
+            WaitUntil(() => Find(window, "AnalyticsFeedback").Current.Name.StartsWith("统计已刷新", StringComparison.Ordinal), "analytics initialized");
+            WaitForGridName(window, "AnalyticsLifeGrid", "UIA-CSV-DEVICE");
+            SetValue(Find(window, "AnalyticsAsset"), "UIA-CSV-DEVICE");
+            Invoke(Find(window, "RefreshAnalytics"));
+            WaitUntil(() => Find(window, "RefreshAnalytics").Current.IsEnabled && Find(window, "AnalyticsLifeGrid").FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)).Count == 1, "analytics exact device filter");
+            WaitForGridName(window, "AnalyticsLifeGrid", "200");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "analytics-life.png"));
+            SetValue(Find(window, "AnalyticsAsset"), "DOES-NOT-EXIST");
+            Invoke(Find(window, "RefreshAnalytics"));
+            WaitUntil(() => Find(window, "AnalyticsFeedback").Current.Name.Contains("未找到", StringComparison.Ordinal), "analytics unknown asset rejected");
+            if (Find(window, "AnalyticsLifeGrid").FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)).Count != 0) throw new InvalidOperationException("Analytics failure retained stale rows.");
+            SetValue(Find(window, "AnalyticsAsset"), "");
+            Invoke(Find(window, "RefreshAnalytics"));
+            WaitUntil(() => Find(window, "AnalyticsFeedback").Current.Name.StartsWith("统计已刷新", StringComparison.Ordinal), "analytics recovered");
+            ((SelectionItemPattern)Find(window, "AnalyticsTrendTab").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            WaitUntil(() => Find(window, "AnalyticsTrendSummary").Current.Name == "所选范围没有故障记录。", "empty trend explicitly described");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "analytics-trend.png"));
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            _steps.Add("Verified native analytics filtering, latest imported count, clear error state and honest empty trend.");
         }
 
         private AutomationElement Start()

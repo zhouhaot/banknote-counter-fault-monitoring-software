@@ -10,6 +10,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
     dotnet test tests/MoneyCounter.Tests/MoneyCounter.Tests.csproj -c Release --no-build --logger trx --results-directory $evidence
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+    dotnet test tests/MoneyCounter.Desktop.Tests/MoneyCounter.Desktop.Tests.csproj -c Release --no-build --logger trx --results-directory $evidence
+    if ($LASTEXITCODE -ne 0) { throw 'Desktop view-model tests failed' }
     $auditText = dotnet package list --project MoneyCounter.sln --include-transitive --vulnerable --format json --no-restore
     if ($LASTEXITCODE -ne 0) { throw 'Dependency audit failed' }
     $auditText | Set-Content (Join-Path $evidence 'dependency-audit.json') -Encoding utf8

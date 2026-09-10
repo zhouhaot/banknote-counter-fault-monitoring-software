@@ -1,3 +1,5 @@
+using MoneyCounter.Core.Analytics;
+using MoneyCounter.Infrastructure.Analytics;
 using System.IO;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,6 +49,7 @@ public partial class App : Application
             services.AddSingleton<IMaintenanceService, SqliteMaintenanceService>();
             services.AddSingleton<IInventoryService, SqliteInventoryService>();
             services.AddSingleton<ICsvImportService, SqliteCsvImportService>();
+            services.AddSingleton<IAnalyticsService, SqliteAnalyticsService>();
             services.AddSingleton<ISimulationService, SqliteSimulationService>();
             services.AddSingleton<RegistryViewModel>();
             _services = services.BuildServiceProvider();
@@ -65,7 +68,8 @@ public partial class App : Application
                 d => new OperationsViewModel(d, _services.GetRequiredService<IOperationsService>(), _services.GetRequiredService<ILogger<OperationsViewModel>>()),
                 Maintenance, Inventory,
                 () => new ImportWindow(_services.GetRequiredService<ICsvImportService>(), _services.GetRequiredService<ILogger<ImportViewModel>>()),
-                () => new SimulationWindow(_services.GetRequiredService<ISimulationService>(), _services.GetRequiredService<ILogger<SimulationViewModel>>())); MainWindow = window;
+                () => new SimulationWindow(_services.GetRequiredService<ISimulationService>(), _services.GetRequiredService<ILogger<SimulationViewModel>>()),
+                () => new AnalyticsWindow(_services.GetRequiredService<IAnalyticsService>(), _services.GetRequiredService<IRegistryService>(), _services.GetRequiredService<ILogger<AnalyticsViewModel>>())); MainWindow = window;
             _instance.StartActivationListener(window); window.Show();
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             await vm.RefreshAsync();
