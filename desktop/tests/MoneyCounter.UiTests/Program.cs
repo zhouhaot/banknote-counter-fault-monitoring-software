@@ -65,6 +65,7 @@ internal static class Program
                 ExerciseImports(main);
                 ExerciseSimulation(main);
                 ExerciseAnalytics(main);
+                ExerciseBackup(main);
                 CaptureWindow(main, Path.Combine(options.EvidenceDirectory, "persisted-device.png"));
                 CloseApplication(main);
             }
@@ -118,6 +119,28 @@ internal static class Program
             CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "analytics-trend.png"));
             ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
             _steps.Add("Verified native analytics filtering, latest imported count, clear error state and honest empty trend.");
+        }
+
+        private void ExerciseBackup(AutomationElement main)
+        {
+            Invoke(Find(main, "NavBackup"));
+            var window = WaitForWindow(_process!.Id, "BackupWindow");
+            WaitUntil(() =>
+            {
+                var feedback = Find(window, "BackupFeedback").Current.Name;
+                return feedback == "尚无备份。" || feedback.StartsWith("已加载", StringComparison.Ordinal);
+            }, "backup list ready");
+            Invoke(Find(window, "CreateBackup"));
+            WaitUntil(() => Find(window, "BackupFeedback").Current.Name.StartsWith("备份已创建", StringComparison.Ordinal), "backup created");
+            var grid = Find(window, "BackupGrid");
+            WaitUntil(() => grid.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)).Count > 0, "backup row created");
+            SelectFirstRow(grid);
+            Invoke(Find(window, "RestoreBackup"));
+            ConfirmYes(main);
+            WaitUntil(() => Find(window, "BackupFeedback").Current.Name.StartsWith("恢复完成", StringComparison.Ordinal), "backup restored");
+            CaptureWindow(window, Path.Combine(options.EvidenceDirectory, "backup-restored.png"));
+            ((WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+            _steps.Add("Created a native SQLite backup, restored the verified snapshot and retained the running data directory.");
         }
 
         private AutomationElement Start()

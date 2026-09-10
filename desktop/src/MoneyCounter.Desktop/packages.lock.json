@@ -107,7 +107,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.0, )",
-          "MoneyCounter.Core": "[0.6.0, )",
+          "MoneyCounter.Core": "[0.7.0, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[2.1.12, )",
           "SQLitePCLRaw.core": "[2.1.12, )",
           "SQLitePCLRaw.lib.e_sqlite3": "[2.1.12, )",

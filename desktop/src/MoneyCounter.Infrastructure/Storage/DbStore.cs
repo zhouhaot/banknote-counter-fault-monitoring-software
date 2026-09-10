@@ -13,8 +13,10 @@ public sealed class DbStore : IAsyncDisposable
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly object _lifecycle = new();
     private readonly TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource? _maintenanceDrained;
     private int _activeOperations;
     private Task? _disposeTask;
+    private bool _maintenancePending;
 
     public DbStore(string path)
     {
@@ -103,6 +105,40 @@ public sealed class DbStore : IAsyncDisposable
     public Task<T> WriteAsync<T>(Func<SqliteConnection, SqliteTransaction, CancellationToken, Task<T>> action, CancellationToken cancellationToken = default) =>
         RunTrackedAsync(() => WriteCoreAsync(action, cancellationToken));
 
+    public Task<T> RunMaintenanceAsync<T>(Func<string, CancellationToken, Task<T>> action, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        TaskCompletionSource drained;
+        lock (_lifecycle)
+        {
+            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            if (_maintenancePending) throw new InvalidOperationException("数据库正在维护，请等待当前备份或恢复完成。");
+            _maintenancePending = true;
+            drained = _maintenanceDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (_activeOperations == 0) drained.TrySetResult();
+        }
+        return RunMaintenanceCoreAsync(action, drained, cancellationToken);
+    }
+
+    private async Task<T> RunMaintenanceCoreAsync<T>(Func<string, CancellationToken, Task<T>> action, TaskCompletionSource drained, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await drained.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return await Task.Run(() => action(DatabasePath, cancellationToken), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_lifecycle)
+            {
+                _maintenancePending = false;
+                _maintenanceDrained = null;
+            }
+        }
+    }
+
+    internal string DatabasePath => new SqliteConnectionStringBuilder(_connectionString).DataSource;
+
     private async Task<T> WriteCoreAsync<T>(Func<SqliteConnection, SqliteTransaction, CancellationToken, Task<T>> action, CancellationToken cancellationToken)
     {
         await _writeGate.WaitAsync(cancellationToken);
@@ -162,6 +198,7 @@ public sealed class DbStore : IAsyncDisposable
         lock (_lifecycle)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            if (_maintenancePending) throw new InvalidOperationException("数据库正在维护，请等待当前备份或恢复完成。");
             _activeOperations++;
         }
         return CompleteTrackedAsync(action);
@@ -174,7 +211,11 @@ public sealed class DbStore : IAsyncDisposable
         {
             lock (_lifecycle)
             {
-                if (--_activeOperations == 0 && _disposeTask is not null) _drained.TrySetResult();
+                if (--_activeOperations == 0)
+                {
+                    if (_disposeTask is not null) _drained.TrySetResult();
+                    if (_maintenancePending) _maintenanceDrained?.TrySetResult();
+                }
             }
         }
     }

@@ -1,5 +1,7 @@
 using MoneyCounter.Core.Analytics;
 using MoneyCounter.Infrastructure.Analytics;
+using MoneyCounter.Core.Backup;
+using MoneyCounter.Infrastructure.Backup;
 using System.IO;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
@@ -51,6 +53,7 @@ public partial class App : Application
             services.AddSingleton<ICsvImportService, SqliteCsvImportService>();
             services.AddSingleton<IAnalyticsService, SqliteAnalyticsService>();
             services.AddSingleton<ISimulationService, SqliteSimulationService>();
+            services.AddSingleton<IBackupService>(_ => new SqliteBackupService(_.GetRequiredService<DbStore>(), Path.Combine(dataDir, "backups")));
             services.AddSingleton<RegistryViewModel>();
             _services = services.BuildServiceProvider();
             await _services.GetRequiredService<DbStore>().InitializeAsync();
@@ -69,7 +72,8 @@ public partial class App : Application
                 Maintenance, Inventory,
                 () => new ImportWindow(_services.GetRequiredService<ICsvImportService>(), _services.GetRequiredService<ILogger<ImportViewModel>>()),
                 () => new SimulationWindow(_services.GetRequiredService<ISimulationService>(), _services.GetRequiredService<ILogger<SimulationViewModel>>()),
-                () => new AnalyticsWindow(_services.GetRequiredService<IAnalyticsService>(), _services.GetRequiredService<IRegistryService>(), _services.GetRequiredService<ILogger<AnalyticsViewModel>>())); MainWindow = window;
+                () => new AnalyticsWindow(_services.GetRequiredService<IAnalyticsService>(), _services.GetRequiredService<IRegistryService>(), _services.GetRequiredService<ILogger<AnalyticsViewModel>>()),
+                () => new BackupWindow(_services.GetRequiredService<IBackupService>(), _services.GetRequiredService<ILogger<BackupViewModel>>())); MainWindow = window;
             _instance.StartActivationListener(window); window.Show();
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             await vm.RefreshAsync();

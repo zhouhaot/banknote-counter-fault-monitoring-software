@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Installer = (Join-Path $PSScriptRoot '../../artifacts/installer/MoneyCounterMonitor-0.6.0-win-x64-setup.exe'))
+param([string]$Installer = (Join-Path $PSScriptRoot '../../artifacts/installer/MoneyCounterMonitor-0.7.0-win-x64-setup.exe'))
 $ErrorActionPreference = 'Stop'
 foreach ($view in @([Microsoft.Win32.RegistryView]::Registry32, [Microsoft.Win32.RegistryView]::Registry64)) {
     $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, $view)
